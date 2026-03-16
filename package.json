@@ -21,7 +21,8 @@
     "bun"
   ],
   "bin": {
-    "local-rag": "./src/cli.ts"
+    "local-rag": "./src/cli.ts",
+    "local-rag-mcp": "./src/server.ts"
   },
   "files": [
     "src/",

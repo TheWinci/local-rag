@@ -6,6 +6,9 @@ Indexes any files — markdown, code, configs, docs — into a per-project vecto
 
 No API keys. No cloud. No Docker. Just `bun install`.
 
+[![npm](https://img.shields.io/npm/v/local-rag-mcp)](https://www.npmjs.com/package/local-rag-mcp)
+[![license](https://img.shields.io/npm/l/local-rag-mcp)](LICENSE)
+
 ## Why
 
 - **AI agents guess filenames.** They read files one at a time and miss things. This gives them semantic search — "how do we deploy?" finds the right doc even if it's called `runbook-prod-release.md`.
@@ -15,9 +18,13 @@ No API keys. No cloud. No Docker. Just `bun install`.
 ## Quick start
 
 ```bash
-git clone <repo>
-cd local-rag-mcp
-bun install
+npm install local-rag-mcp
+```
+
+Or with Bun:
+
+```bash
+bun add local-rag-mcp
 ```
 
 > **macOS:** Apple's bundled SQLite doesn't support extensions. Run `brew install sqlite` first.
@@ -30,8 +37,8 @@ In `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (per-
 {
   "mcpServers": {
     "local-rag": {
-      "command": "bun",
-      "args": ["run", "/path/to/local-rag-mcp/src/server.ts"],
+      "command": "bunx",
+      "args": ["local-rag-mcp"],
       "env": {
         "RAG_PROJECT_DIR": "/path/to/your/project"
       }
@@ -71,13 +78,13 @@ The CLI is available for manual use, debugging, and analytics:
 
 ```bash
 # Search by meaning
-bun run src/cli.ts search "database connection setup" --dir /path/to/project
+bunx local-rag search "database connection setup" --dir /path/to/project
 
 # Check what's indexed
-bun run src/cli.ts status /path/to/project
+bunx local-rag status /path/to/project
 
 # Manual index (not needed if using the MCP server)
-bun run src/cli.ts index /path/to/project
+bunx local-rag index /path/to/project
 ```
 
 ## MCP tools
@@ -95,12 +102,12 @@ These tools are available to any MCP client (Claude Code, etc.) once the server 
 ## CLI commands
 
 ```bash
-local-rag init [dir]                     # Create .rag/config.json with defaults
-local-rag index [dir]                    # Index files
-local-rag search <query> [--top N]       # Search by meaning
-local-rag status [dir]                   # Show index stats
-local-rag remove <file> [dir]            # Remove a file from the index
-local-rag analytics [dir] [--days N]     # Show search usage analytics
+bunx local-rag init [dir]                     # Create .rag/config.json with defaults
+bunx local-rag index [dir]                    # Index files
+bunx local-rag search <query> [--top N]       # Search by meaning
+bunx local-rag status [dir]                   # Show index stats
+bunx local-rag remove <file> [dir]            # Remove a file from the index
+bunx local-rag analytics [dir] [--days N]     # Show search usage analytics
 ```
 
 ## Analytics
