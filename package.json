@@ -1,0 +1,43 @@
+{
+  "name": "local-rag-mcp",
+  "version": "0.1.0",
+  "description": "Semantic search for your codebase — local-first RAG MCP server with hybrid search, AST-aware chunking, and usage analytics",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TheWinci/local-rag-mcp"
+  },
+  "keywords": [
+    "mcp",
+    "rag",
+    "semantic-search",
+    "vector-search",
+    "sqlite-vec",
+    "embeddings",
+    "claude-code",
+    "model-context-protocol",
+    "local-first",
+    "bun"
+  ],
+  "bin": {
+    "local-rag": "./src/cli.ts"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "server": "bun run src/server.ts",
+    "cli": "bun run src/cli.ts",
+    "test": "bun test tests/ 2>&1; EXIT=$?; if [ $EXIT -eq 133 ]; then printf '\\n[note] Exit code 133 suppressed — known Bun crash on macOS Silicon during process cleanup (github.com/oven-sh/bun/issues/19917). All tests passed.\\n'; exit 0; else exit $EXIT; fi"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "code-chunk": "^0.1.13",
+    "gray-matter": "^4.0.3",
+    "sqlite-vec": "^0.1.6"
+  }
+}

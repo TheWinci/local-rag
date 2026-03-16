@@ -1,0 +1,43 @@
+import { readFile, writeFile, mkdir } from "fs/promises";
+import { join } from "path";
+import { existsSync } from "fs";
+
+export interface RagConfig {
+  include: string[];
+  exclude: string[];
+  chunkSize: number;
+  chunkOverlap: number;
+  hybridWeight: number; // 0-1: 1 = vector only, 0 = BM25 only, 0.7 = default blend
+}
+
+const DEFAULT_CONFIG: RagConfig = {
+  include: ["**/*.md", "**/*.txt"],
+  exclude: ["node_modules/**", ".git/**", "dist/**", ".rag/**"],
+  chunkSize: 512,
+  chunkOverlap: 50,
+  hybridWeight: 0.7,
+};
+
+export async function loadConfig(projectDir: string): Promise<RagConfig> {
+  const configPath = join(projectDir, ".rag", "config.json");
+
+  if (!existsSync(configPath)) {
+    return { ...DEFAULT_CONFIG };
+  }
+
+  const raw = await readFile(configPath, "utf-8");
+  const userConfig = JSON.parse(raw);
+
+  return {
+    ...DEFAULT_CONFIG,
+    ...userConfig,
+  };
+}
+
+export async function writeDefaultConfig(projectDir: string): Promise<string> {
+  const ragDir = join(projectDir, ".rag");
+  await mkdir(ragDir, { recursive: true });
+  const configPath = join(ragDir, "config.json");
+  await writeFile(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n");
+  return configPath;
+}
