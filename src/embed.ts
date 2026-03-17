@@ -1,7 +1,13 @@
 import {
+  env,
   pipeline,
   type FeatureExtractionPipeline,
 } from "@huggingface/transformers";
+import { join } from "node:path";
+import { homedir } from "node:os";
+
+// Use a stable cache directory so models survive bunx temp dir cleanup
+env.cacheDir = join(homedir(), ".cache", "local-rag-mcp", "models");
 
 const MODEL_ID = "Xenova/all-MiniLM-L6-v2";
 const EMBEDDING_DIM = 384;
