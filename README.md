@@ -29,9 +29,16 @@ bun add local-rag-mcp
 
 > **macOS:** Apple's bundled SQLite doesn't support extensions. Run `brew install sqlite` first.
 
-### Add to Claude Code
+### Add to your editor
 
-In `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (per-project):
+Works with any [MCP](https://modelcontextprotocol.io/)-compatible client. Add this server config to your editor's MCP config file:
+
+| Editor | Config file |
+|---|---|
+| Claude Code | `~/.claude/settings.json` or `<project>/.claude/settings.json` |
+| Cursor | `<project>/.cursor/mcp.json` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| VS Code (Copilot) | `<project>/.vscode/mcp.json` |
 
 ```json
 {
@@ -46,6 +53,8 @@ In `~/.claude/settings.json` (global) or `<project>/.claude/settings.json` (per-
   }
 }
 ```
+
+> **VS Code note:** Uses `"servers"` instead of `"mcpServers"` and requires `"type": "stdio"` on the server object.
 
 Omit `RAG_PROJECT_DIR` for per-project configs — the server uses cwd.
 
@@ -62,7 +71,7 @@ Progress is logged to stderr:
 
 ### Make the agent use it automatically
 
-The MCP server registers tools, but the agent won't reach for them on its own unless you tell it to. Add this to your project's `CLAUDE.md`:
+The MCP server registers tools, but agents won't reach for them on their own unless you tell them to. Add instructions to your editor's rules file (`CLAUDE.md`, `.cursorrules`, `.windsurfrules`, or `.github/copilot-instructions.md`):
 
 ```markdown
 ## Using local-rag tools
@@ -81,7 +90,7 @@ This project has a local RAG index (local-rag-mcp). Use these MCP tools:
   results — this reveals documentation gaps.
 ```
 
-Without this, the agent only uses the tools when you explicitly ask it to search. With it, the agent proactively searches the index and uses the project map for navigation.
+Without this, the agent only uses the tools when you explicitly ask. With it, the agent proactively searches the index and uses the project map for navigation.
 
 ### CLI usage
 
