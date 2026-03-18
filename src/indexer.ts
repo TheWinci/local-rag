@@ -172,6 +172,7 @@ export async function indexDirectory(
         continue;
       }
 
+      onProgress?.(`Indexing ${relative(directory, filePath)}`);
       const parsed = await parseFile(filePath);
 
       if (!KNOWN_EXTENSIONS.has(parsed.extension)) {
