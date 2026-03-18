@@ -13,6 +13,8 @@ export interface ChunkExport {
 export interface Chunk {
   text: string;
   index: number;
+  startLine?: number;
+  endLine?: number;
   imports?: ChunkImport[];
   exports?: ChunkExport[];
 }
@@ -64,6 +66,18 @@ export const KNOWN_EXTENSIONS = new Set([
  * - Other: split on paragraphs, then by size
  */
 export async function chunkText(
+  text: string,
+  extension: string,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+  chunkOverlap = DEFAULT_CHUNK_OVERLAP,
+  filePath?: string
+): Promise<Chunk[]> {
+  const chunks = await _chunkText(text, extension, chunkSize, chunkOverlap, filePath);
+  assignLineNumbers(chunks, text);
+  return chunks;
+}
+
+async function _chunkText(
   text: string,
   extension: string,
   chunkSize = DEFAULT_CHUNK_SIZE,
@@ -150,6 +164,24 @@ export async function chunkText(
   }
 
   return chunks;
+}
+
+/**
+ * Assign startLine/endLine to each chunk by locating the chunk text in the
+ * original file source. Uses indexOf with a forward cursor so overlapping or
+ * repeated text still resolves in order. Chunks whose text is not a verbatim
+ * substring (e.g. JSON-reformatted chunks) are left without line numbers.
+ */
+function assignLineNumbers(chunks: Chunk[], fullText: string): void {
+  let cursor = 0;
+  for (const chunk of chunks) {
+    const idx = fullText.indexOf(chunk.text, cursor);
+    if (idx >= 0) {
+      chunk.startLine = fullText.slice(0, idx).split("\n").length;
+      chunk.endLine = fullText.slice(0, idx + chunk.text.length).split("\n").length;
+      cursor = idx + chunk.text.length;
+    }
+  }
 }
 
 function splitMarkdown(text: string): string[] {

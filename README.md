@@ -26,6 +26,7 @@ No API keys. No cloud. No Docker. Just `bunx`.
 - **AI agents guess filenames.** They read files one at a time and miss things. This gives them semantic search — "how do we deploy?" finds the right doc even if it's called `runbook-prod-release.md`.
 - **No one reads the docs.** Docs exist but never get surfaced at the right moment. This makes them findable by meaning, automatically.
 - **Analytics expose documentation gaps.** After a week of usage, you'll know which topics people search for but can't find — that's a free gap analysis.
+- **Refactoring is blind.** Agents change a function signature and have no way to find all callers. `find_usages` enumerates every call site across the codebase with file and line number, so you know what breaks before you change anything.
 
 ## Quick start
 
@@ -136,8 +137,10 @@ This project has a local RAG index (local-rag-mcp). Use these MCP tools:
   with snippet previews — use this when you need to know *where* something is.
 - **`read_relevant`**: Get the actual content of relevant semantic chunks —
   individual functions, classes, or markdown sections — ranked by relevance.
-  Use this instead of `search` + `Read` when you need the content itself. Two
-  chunks from the same file can both appear (no file deduplication).
+  Results include exact line ranges (`src/db.ts:42-67`) so you can navigate
+  directly to the edit location. Use this instead of `search` + `Read` when
+  you need the content itself. Two chunks from the same file can both appear
+  (no file deduplication).
 - **`project_map`**: When you need to understand how files relate to each other,
   generate a dependency graph. Use `focus` to zoom into a specific file's
   neighborhood. This is faster than reading import statements across many files.
@@ -156,6 +159,9 @@ This project has a local RAG index (local-rag-mcp). Use these MCP tools:
   results — this reveals documentation gaps.
 - **`search_symbols`**: When you know a symbol name (function, class, type, etc.),
   find it directly by name instead of using semantic search.
+- **`find_usages`**: Before changing a function or type, find all its call sites.
+  Use this to understand the blast radius of a rename or API change. Faster and
+  more reliable than semantic search for finding usages.
 - **`write_relevant`**: Before adding new code or docs, find the best insertion
   point — returns the most semantically appropriate file and anchor.
 ```
@@ -180,6 +186,7 @@ These tools are available to any MCP client (Claude Code, etc.) once the server 
 | `list_checkpoints` | List checkpoints, most recent first. Filter by session or type |
 | `search_checkpoints` | Semantic search over checkpoint titles and summaries |
 | `search_symbols` | Find exported symbols by name — functions, classes, types, interfaces, enums. Faster than semantic search when you know the symbol name |
+| `find_usages` | Find every call site of a symbol across the codebase — returns file paths, line numbers (`path:line`), and the matching line. Excludes the defining file |
 | `write_relevant` | Find the best insertion point for new content — returns semantically appropriate files and anchors |
 
 ## Analytics
@@ -414,7 +421,9 @@ flowchart TD
 
 4. **Extract imports/exports** — During AST chunking, import specifiers and exported symbols are captured. After all files are indexed, relative imports are resolved to actual files in the index (with extension probing for `.ts`/`.tsx`/`.js`/`.jsx`). This builds the dependency graph.
 
-5. **Hybrid search** — Queries run both vector similarity (semantic) and BM25 (keyword) searches in parallel, then blend results using `hybridWeight` (default 0.7 = 70% semantic, 30% keyword). `search` deduplicates by file and returns the best-scoring file with a 400-char snippet. `read_relevant` skips deduplication and returns top-N individual chunks with full content and entity names (function/class names from AST parsing), so you get exactly the relevant code units without reading entire files.
+5. **Hybrid search** — Queries run both vector similarity (semantic) and BM25 (keyword) searches in parallel, then blend results using `hybridWeight` (default 0.7 = 70% semantic, 30% keyword). `search` deduplicates by file and returns the best-scoring file with a 400-char snippet. `read_relevant` skips deduplication and returns top-N individual chunks with full content, entity names (function/class names from AST parsing), and **exact line ranges** (`path:start-end`) — so you can navigate directly to an edit location without reading the full file.
+
+5a. **Usage search** — `find_usages` locates every call site of a symbol by querying the FTS index, excluding the file that defines it, and resolving per-line matches using the stored chunk line ranges. Useful before any rename or API change to understand the blast radius.
 
 6. **Project map** — Generates a Mermaid dependency graph from the stored import/export relationships. Supports file-level and directory-level zoom, and focused subgraphs (BFS from a specific file). Entry points are auto-detected and highlighted.
 

@@ -122,7 +122,7 @@ export async function indexFile(
       filePath
     );
 
-    const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null }[] = [];
+    const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null; startLine?: number | null; endLine?: number | null }[] = [];
     for (const chunk of chunks) {
       const embedding = await embed(chunk.text);
       const primaryExport = chunk.exports?.[0];
@@ -131,6 +131,8 @@ export async function indexFile(
         embedding,
         entityName: primaryExport?.name ?? null,
         chunkType: primaryExport?.type ?? null,
+        startLine: chunk.startLine ?? null,
+        endLine: chunk.endLine ?? null,
       });
     }
 
@@ -194,7 +196,7 @@ export async function indexDirectory(
         filePath
       );
 
-      const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null }[] = [];
+      const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null; startLine?: number | null; endLine?: number | null }[] = [];
       for (const chunk of chunks) {
         const embedding = await embed(chunk.text);
         const primaryExport = chunk.exports?.[0];
@@ -203,6 +205,8 @@ export async function indexDirectory(
           embedding,
           entityName: primaryExport?.name ?? null,
           chunkType: primaryExport?.type ?? null,
+          startLine: chunk.startLine ?? null,
+          endLine: chunk.endLine ?? null,
         });
       }
 

@@ -14,6 +14,8 @@ export interface ChunkResult {
   chunkIndex: number;
   entityName: string | null;
   chunkType: string | null;
+  startLine: number | null;
+  endLine: number | null;
 }
 
 // Default: 70% vector, 30% BM25
@@ -137,6 +139,8 @@ export async function searchChunks(
     chunkIndex: number;
     entityName: string | null;
     chunkType: string | null;
+    startLine: number | null;
+    endLine: number | null;
   }>();
 
   for (const r of vectorResults) {
@@ -149,6 +153,8 @@ export async function searchChunks(
       chunkIndex: r.chunkIndex,
       entityName: r.entityName,
       chunkType: r.chunkType,
+      startLine: r.startLine,
+      endLine: r.endLine,
     });
   }
 
@@ -166,6 +172,8 @@ export async function searchChunks(
         chunkIndex: r.chunkIndex,
         entityName: r.entityName,
         chunkType: r.chunkType,
+        startLine: r.startLine,
+        endLine: r.endLine,
       });
     }
   }
@@ -178,6 +186,8 @@ export async function searchChunks(
       chunkIndex: r.chunkIndex,
       entityName: r.entityName,
       chunkType: r.chunkType,
+      startLine: r.startLine,
+      endLine: r.endLine,
     }))
     .filter((r) => r.score >= threshold)
     .sort((a, b) => b.score - a.score)

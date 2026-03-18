@@ -36,6 +36,8 @@ export interface StoredChunk {
   snippet: string;
   entityName: string | null;
   chunkType: string | null;
+  startLine: number | null;
+  endLine: number | null;
 }
 
 export interface StoredFile {
@@ -61,6 +63,14 @@ export interface ChunkSearchResult {
   chunkIndex: number;
   entityName: string | null;
   chunkType: string | null;
+  startLine: number | null;
+  endLine: number | null;
+}
+
+export interface UsageResult {
+  path: string;
+  line: number | null;
+  snippet: string;
 }
 
 export interface SymbolResult {
@@ -142,7 +152,9 @@ export class RagDB {
         chunk_index INTEGER NOT NULL,
         snippet TEXT NOT NULL,
         entity_name TEXT,
-        chunk_type TEXT
+        chunk_type TEXT,
+        start_line INTEGER,
+        end_line INTEGER
       );
 
       CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
@@ -271,12 +283,22 @@ export class RagDB {
       );
     `);
 
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS symbol_usages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id     INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        symbol_name TEXT NOT NULL,
+        line        INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_usages_symbol ON symbol_usages(symbol_name COLLATE NOCASE);
+      CREATE INDEX IF NOT EXISTS idx_usages_file ON symbol_usages(file_id);
+    `);
+
     // Migrations for existing databases
     this.migrateChunksEntityColumns();
   }
 
   private migrateChunksEntityColumns() {
-    // Add entity_name and chunk_type columns if they don't exist yet
     const cols = this.db
       .query<{ name: string }, []>("PRAGMA table_info(chunks)")
       .all()
@@ -287,6 +309,12 @@ export class RagDB {
     }
     if (!cols.includes("chunk_type")) {
       this.db.exec("ALTER TABLE chunks ADD COLUMN chunk_type TEXT");
+    }
+    if (!cols.includes("start_line")) {
+      this.db.exec("ALTER TABLE chunks ADD COLUMN start_line INTEGER");
+    }
+    if (!cols.includes("end_line")) {
+      this.db.exec("ALTER TABLE chunks ADD COLUMN end_line INTEGER");
     }
   }
 
@@ -299,7 +327,7 @@ export class RagDB {
   upsertFile(
     path: string,
     hash: string,
-    chunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null }[]
+    chunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null; startLine?: number | null; endLine?: number | null }[]
   ) {
     const tx = this.db.transaction(() => {
       // Remove old data if exists
@@ -329,10 +357,10 @@ export class RagDB {
 
       // Insert chunks + vectors
       for (let i = 0; i < chunks.length; i++) {
-        const { snippet, embedding, entityName, chunkType } = chunks[i];
+        const { snippet, embedding, entityName, chunkType, startLine, endLine } = chunks[i];
         this.db.run(
-          "INSERT INTO chunks (file_id, chunk_index, snippet, entity_name, chunk_type) VALUES (?, ?, ?, ?, ?)",
-          [fileId, i, snippet, entityName ?? null, chunkType ?? null]
+          "INSERT INTO chunks (file_id, chunk_index, snippet, entity_name, chunk_type, start_line, end_line) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [fileId, i, snippet, entityName ?? null, chunkType ?? null, startLine ?? null, endLine ?? null]
         );
         const chunkId = Number(
           this.db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id
@@ -463,9 +491,9 @@ export class RagDB {
     return rows.map((row) => {
       const chunk = this.db
         .query<
-          { snippet: string; chunk_index: number; file_id: number; entity_name: string | null; chunk_type: string | null },
+          { snippet: string; chunk_index: number; file_id: number; entity_name: string | null; chunk_type: string | null; start_line: number | null; end_line: number | null },
           [number]
-        >("SELECT snippet, chunk_index, file_id, entity_name, chunk_type FROM chunks WHERE id = ?")
+        >("SELECT snippet, chunk_index, file_id, entity_name, chunk_type, start_line, end_line FROM chunks WHERE id = ?")
         .get(row.chunk_id)!;
       const file = this.db
         .query<{ path: string }, [number]>(
@@ -482,6 +510,8 @@ export class RagDB {
         chunkIndex: chunk.chunk_index,
         entityName: chunk.entity_name,
         chunkType: chunk.chunk_type,
+        startLine: chunk.start_line,
+        endLine: chunk.end_line,
       };
     });
   }
@@ -489,10 +519,10 @@ export class RagDB {
   textSearchChunks(query: string, topK: number = 8): ChunkSearchResult[] {
     const rows = this.db
       .query<
-        { id: number; snippet: string; chunk_index: number; file_id: number; entity_name: string | null; chunk_type: string | null; rank: number },
+        { id: number; snippet: string; chunk_index: number; file_id: number; entity_name: string | null; chunk_type: string | null; start_line: number | null; end_line: number | null; rank: number },
         [string, number]
       >(
-        `SELECT c.id, c.snippet, c.chunk_index, c.file_id, c.entity_name, c.chunk_type, rank
+        `SELECT c.id, c.snippet, c.chunk_index, c.file_id, c.entity_name, c.chunk_type, c.start_line, c.end_line, rank
          FROM fts_chunks f
          JOIN chunks c ON c.id = f.rowid
          WHERE fts_chunks MATCH ?
@@ -517,6 +547,8 @@ export class RagDB {
         chunkIndex: row.chunk_index,
         entityName: row.entity_name,
         chunkType: row.chunk_type,
+        startLine: row.start_line,
+        endLine: row.end_line,
       };
     });
   }
@@ -1254,7 +1286,90 @@ export class RagDB {
     };
   }
 
+  /**
+   * Find usages of a symbol across the codebase.
+   * Uses FTS to locate chunks containing the symbol, then excludes the files
+   * that define it (via file_exports). Returns up to `top` results with
+   * per-match line numbers derived from the chunk's start_line.
+   */
+  findUsages(symbolName: string, exact: boolean, top: number): UsageResult[] {
+    // Files that export (define) this symbol — excluded from results
+    const definingFileIds = new Set(
+      this.db
+        .query<{ file_id: number }, [string]>(
+          "SELECT file_id FROM file_exports WHERE LOWER(name) = LOWER(?)"
+        )
+        .all(symbolName)
+        .map((r) => r.file_id)
+    );
+
+    // FTS search for chunks containing the symbol name
+    let rows: { id: number; snippet: string; file_id: number; chunk_index: number; start_line: number | null }[] = [];
+    try {
+      const ftsQuery = `"${symbolName.replace(/"/g, '""')}"`;
+      rows = this.db
+        .query<
+          { id: number; snippet: string; file_id: number; chunk_index: number; start_line: number | null },
+          [string, number]
+        >(
+          `SELECT c.id, c.snippet, c.file_id, c.chunk_index, c.start_line
+           FROM fts_chunks f
+           JOIN chunks c ON c.id = f.rowid
+           WHERE fts_chunks MATCH ?
+           ORDER BY rank
+           LIMIT ?`
+        )
+        .all(ftsQuery, top * 5);
+    } catch {
+      // FTS may fail on special chars — return empty
+      return [];
+    }
+
+    const pattern = exact
+      ? new RegExp(`\\b${escapeRegex(symbolName)}\\b`, "i")
+      : new RegExp(`\\b${escapeRegex(symbolName)}`, "i");
+
+    const results: UsageResult[] = [];
+
+    for (const row of rows) {
+      if (definingFileIds.has(row.file_id)) continue;
+
+      const file = this.db
+        .query<{ path: string }, [number]>("SELECT path FROM files WHERE id = ?")
+        .get(row.file_id);
+      if (!file) continue;
+
+      // Find which line within the chunk matches
+      const lines = row.snippet.split("\n");
+      let matchOffset = -1;
+      let matchSnippet = row.snippet.slice(0, 120).trim();
+
+      for (let i = 0; i < lines.length; i++) {
+        if (pattern.test(lines[i])) {
+          matchOffset = i;
+          matchSnippet = lines[i].trim();
+          break;
+        }
+      }
+
+      // Combine chunk start_line with within-chunk offset for absolute line number
+      const line =
+        row.start_line != null && matchOffset >= 0
+          ? row.start_line + matchOffset - 1
+          : row.start_line;
+
+      results.push({ path: file.path, line, snippet: matchSnippet });
+      if (results.length >= top) break;
+    }
+
+    return results;
+  }
+
   close() {
     this.db.close();
   }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
