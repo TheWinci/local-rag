@@ -1,4 +1,4 @@
-import { watch, type FSWatcher } from "fs";
+import { watch } from "fs";
 import { resolve, relative } from "path";
 import { existsSync } from "fs";
 import { Glob } from "bun";
@@ -13,15 +13,19 @@ function matchesAny(filePath: string, patterns: string[]): boolean {
   return patterns.some((pat) => new Glob(pat).match(filePath));
 }
 
+export interface Watcher {
+  close(): void;
+}
+
 export function startWatcher(
   directory: string,
   db: RagDB,
   config: RagConfig,
   onEvent?: (msg: string) => void
-): FSWatcher {
+): Watcher {
   const pending = new Map<string, NodeJS.Timeout>();
 
-  const watcher = watch(directory, { recursive: true }, (_event, filename) => {
+  const fsWatcher = watch(directory, { recursive: true }, (_event, filename) => {
     if (!filename) return;
 
     const rel = filename.toString();
@@ -70,5 +74,11 @@ export function startWatcher(
   });
 
   onEvent?.(`Watching ${directory} for changes`);
-  return watcher;
+  return {
+    close() {
+      for (const timer of pending.values()) clearTimeout(timer);
+      pending.clear();
+      fsWatcher.close();
+    },
+  };
 }

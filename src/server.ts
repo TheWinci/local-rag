@@ -7,7 +7,7 @@ import { RagDB } from "./db";
 import { loadConfig } from "./config";
 import { indexDirectory } from "./indexer";
 import { search, searchChunks } from "./search";
-import { startWatcher } from "./watcher";
+import { startWatcher, type Watcher } from "./watcher";
 import { generateMermaid } from "./graph";
 import { embed } from "./embed";
 import { discoverSessions } from "./conversation";
@@ -556,8 +556,8 @@ if (resolve(startupDir) === homedir()) {
 const startupDb = getDB(startupDir);
 const startupConfig = await loadConfig(startupDir);
 
-let watcher: import("fs").FSWatcher | null = null;
-let convWatcher: import("fs").FSWatcher | null = null;
+let watcher: Watcher | null = null;
+let convWatcher: Watcher | null = null;
 
 // Index in background — don't block server startup
 indexDirectory(startupDir, startupDb, startupConfig, (msg) => {
@@ -619,6 +619,7 @@ function cleanup() {
 
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
+process.on("SIGHUP", cleanup);
 
 // Start server
 const transport = new StdioServerTransport();

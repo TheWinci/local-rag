@@ -1,8 +1,9 @@
-import { watch, type FSWatcher, statSync } from "fs";
+import { watch, statSync } from "fs";
 import { readJSONL, parseTurns, buildTurnText, type ParsedTurn } from "./conversation";
 import { chunkText } from "./chunker";
 import { embed } from "./embed";
 import { type RagDB } from "./db";
+import { type Watcher } from "./watcher";
 
 const TAIL_DEBOUNCE_MS = 1500;
 
@@ -92,7 +93,7 @@ export function startConversationTail(
   sessionId: string,
   db: RagDB,
   onEvent?: (msg: string) => void
-): FSWatcher {
+): Watcher {
   let currentOffset = 0;
   let currentTurnIndex = 0;
   let pending: NodeJS.Timeout | null = null;
@@ -137,5 +138,10 @@ export function startConversationTail(
   processNewData();
 
   onEvent?.(`Tailing conversation: ${jsonlPath}`);
-  return watcher;
+  return {
+    close() {
+      if (pending) { clearTimeout(pending); pending = null; }
+      watcher.close();
+    },
+  };
 }
