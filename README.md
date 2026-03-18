@@ -430,7 +430,7 @@ Create `.rag/config.json` in your project (or run `local-rag init`):
 }
 ```
 
-or an example of exluding files that are definetly not supported and i thought of them - might have missed some
+or an example of excluding files that are definitely not supported and i thought of them - might have missed some
 
 ```json
 {
