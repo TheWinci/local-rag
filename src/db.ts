@@ -73,6 +73,16 @@ export interface UsageResult {
   snippet: string;
 }
 
+export interface AnnotationRow {
+  id: number;
+  path: string;
+  symbolName: string | null;
+  note: string;
+  author: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SymbolResult {
   path: string;
   symbolName: string;
@@ -292,6 +302,30 @@ export class RagDB {
       );
       CREATE INDEX IF NOT EXISTS idx_usages_symbol ON symbol_usages(symbol_name COLLATE NOCASE);
       CREATE INDEX IF NOT EXISTS idx_usages_file ON symbol_usages(file_id);
+    `);
+
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS annotations (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        path        TEXT NOT NULL,
+        symbol_name TEXT,
+        note        TEXT NOT NULL,
+        author      TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ann_path ON annotations(path);
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS fts_annotations USING fts5(
+        note,
+        content='annotations',
+        content_rowid='id'
+      );
+
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_annotations USING vec0(
+        annotation_id INTEGER PRIMARY KEY,
+        embedding FLOAT[${EMBEDDING_DIM}]
+      );
     `);
 
     // Migrations for existing databases
@@ -1363,6 +1397,172 @@ export class RagDB {
     }
 
     return results;
+  }
+
+  // ── Annotation methods ──────────────────────────────────────────
+
+  /**
+   * Upsert an annotation for a file or symbol.
+   * Key: (path, symbol_name). Calling again on the same target updates the note.
+   * FTS is managed manually (no triggers) so UPDATE is handled cleanly.
+   */
+  upsertAnnotation(
+    path: string,
+    note: string,
+    embedding: Float32Array,
+    symbolName?: string | null,
+    author?: string | null
+  ): number {
+    let annotationId = 0;
+
+    const tx = this.db.transaction(() => {
+      // Find existing annotation for this path+symbol key
+      let existing: { id: number; note: string } | null = null;
+      if (symbolName) {
+        existing = this.db
+          .query<{ id: number; note: string }, [string, string]>(
+            "SELECT id, note FROM annotations WHERE path = ? AND symbol_name = ?"
+          )
+          .get(path, symbolName);
+      } else {
+        existing = this.db
+          .query<{ id: number; note: string }, [string]>(
+            "SELECT id, note FROM annotations WHERE path = ? AND symbol_name IS NULL"
+          )
+          .get(path);
+      }
+
+      const now = new Date().toISOString();
+
+      if (existing) {
+        // Remove old FTS entry
+        this.db.run(
+          "INSERT INTO fts_annotations(fts_annotations, rowid, note) VALUES ('delete', ?, ?)",
+          [existing.id, existing.note]
+        );
+        // Update the row
+        this.db.run(
+          "UPDATE annotations SET note = ?, author = ?, updated_at = ? WHERE id = ?",
+          [note, author ?? null, now, existing.id]
+        );
+        // Re-insert into FTS
+        this.db.run("INSERT INTO fts_annotations(rowid, note) VALUES (?, ?)", [existing.id, note]);
+        // Replace vector
+        this.db.run("DELETE FROM vec_annotations WHERE annotation_id = ?", [existing.id]);
+        this.db.run(
+          "INSERT INTO vec_annotations (annotation_id, embedding) VALUES (?, ?)",
+          [existing.id, new Uint8Array(embedding.buffer)]
+        );
+        annotationId = existing.id;
+      } else {
+        // Insert new annotation
+        this.db.run(
+          "INSERT INTO annotations (path, symbol_name, note, author, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [path, symbolName ?? null, note, author ?? null, now, now]
+        );
+        annotationId = Number(
+          this.db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id
+        );
+        // Insert into FTS
+        this.db.run("INSERT INTO fts_annotations(rowid, note) VALUES (?, ?)", [annotationId, note]);
+        // Insert vector
+        this.db.run(
+          "INSERT INTO vec_annotations (annotation_id, embedding) VALUES (?, ?)",
+          [annotationId, new Uint8Array(embedding.buffer)]
+        );
+      }
+    });
+
+    tx();
+    return annotationId;
+  }
+
+  getAnnotations(path?: string, symbolName?: string | null): AnnotationRow[] {
+    let sql = "SELECT * FROM annotations WHERE 1=1";
+    const params: (string | null)[] = [];
+
+    if (path !== undefined) {
+      sql += " AND path = ?";
+      params.push(path);
+    }
+    if (symbolName !== undefined) {
+      if (symbolName === null) {
+        sql += " AND symbol_name IS NULL";
+      } else {
+        sql += " AND symbol_name = ?";
+        params.push(symbolName);
+      }
+    }
+
+    sql += " ORDER BY updated_at DESC";
+
+    return this.db
+      .query<any, any[]>(sql)
+      .all(...params)
+      .map((r: any) => ({
+        id: r.id,
+        path: r.path,
+        symbolName: r.symbol_name,
+        note: r.note,
+        author: r.author,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      }));
+  }
+
+  searchAnnotations(
+    queryEmbedding: Float32Array,
+    topK: number = 10
+  ): (AnnotationRow & { score: number })[] {
+    const rows = this.db
+      .query<{ annotation_id: number; distance: number }, [Uint8Array, number]>(
+        `SELECT annotation_id, distance
+         FROM vec_annotations
+         WHERE embedding MATCH ?
+         ORDER BY distance
+         LIMIT ?`
+      )
+      .all(new Uint8Array(queryEmbedding.buffer), topK);
+
+    const results: (AnnotationRow & { score: number })[] = [];
+    for (const row of rows) {
+      const ann = this.db
+        .query<any, [number]>("SELECT * FROM annotations WHERE id = ?")
+        .get(row.annotation_id);
+      if (!ann) continue;
+      results.push({
+        id: ann.id,
+        path: ann.path,
+        symbolName: ann.symbol_name,
+        note: ann.note,
+        author: ann.author,
+        createdAt: ann.created_at,
+        updatedAt: ann.updated_at,
+        score: 1 / (1 + row.distance),
+      });
+    }
+    return results;
+  }
+
+  deleteAnnotation(id: number): boolean {
+    const existing = this.db
+      .query<{ id: number; note: string }, [number]>(
+        "SELECT id, note FROM annotations WHERE id = ?"
+      )
+      .get(id);
+    if (!existing) return false;
+
+    const tx = this.db.transaction(() => {
+      this.db.run(
+        "INSERT INTO fts_annotations(fts_annotations, rowid, note) VALUES ('delete', ?, ?)",
+        [id, existing.note]
+      );
+      this.db.run("DELETE FROM vec_annotations WHERE annotation_id = ?", [id]);
+      this.db.run("DELETE FROM annotations WHERE id = ?", [id]);
+    });
+
+    tx();
+    return true;
   }
 
   close() {

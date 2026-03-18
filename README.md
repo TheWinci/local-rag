@@ -28,6 +28,7 @@ No API keys. No cloud. No Docker. Just `bunx`.
 - **Analytics expose documentation gaps.** After a week of usage, you'll know which topics people search for but can't find — that's a free gap analysis.
 - **Refactoring is blind.** Agents change a function signature and have no way to find all callers. `find_usages` enumerates every call site across the codebase with file and line number, so you know what breaks before you change anything.
 - **Agents work on stale mental models.** They search for code without knowing what's already been modified in the working tree. `git_context` surfaces uncommitted changes, recent commits, and changed files in one call — annotated with whether each file is in the index or not.
+- **Known issues get rediscovered every session.** There's no way to attach "don't touch this until the auth rewrite lands" to a specific function. `annotate` persists notes on files or symbols that surface automatically when the relevant code appears in search results.
 
 ## Quick start
 
@@ -167,6 +168,11 @@ This project has a local RAG index (local-rag-mcp). Use these MCP tools:
   call this to see what files have already been modified, recent commits, and
   which changed files are in the index. Avoids redundant searches and conflicting
   edits on already-modified files.
+- **`annotate`**: Attach a persistent note to a file or symbol — "known race
+  condition", "don't refactor until auth rewrite lands", etc. Notes appear as
+  `[NOTE]` blocks inline in `read_relevant` results automatically.
+- **`get_annotations`**: Retrieve all notes for a file, or search semantically
+  across all annotations to find relevant caveats before editing.
 - **`write_relevant`**: Before adding new code or docs, find the best insertion
   point — returns the most semantically appropriate file and anchor.
 ```
@@ -193,6 +199,8 @@ These tools are available to any MCP client (Claude Code, etc.) once the server 
 | `search_symbols` | Find exported symbols by name — functions, classes, types, interfaces, enums. Faster than semantic search when you know the symbol name |
 | `find_usages` | Find every call site of a symbol across the codebase — returns file paths, line numbers (`path:line`), and the matching line. Excludes the defining file |
 | `git_context` | Show uncommitted changes (annotated `[indexed]`/`[not indexed]`), recent commits, and changed files. Optional unified diff (`include_diff`). Non-git directories return a graceful message |
+| `annotate` | Attach a persistent note to a file or symbol. Notes survive sessions and surface inline in `read_relevant` results. Upserts by `(path, symbol)` key |
+| `get_annotations` | Retrieve notes by file path, or search semantically across all annotations |
 | `write_relevant` | Find the best insertion point for new content — returns semantically appropriate files and anchors |
 
 ## Analytics
@@ -441,7 +449,19 @@ flowchart TD
 
 10. **Checkpoints** — Agents create named snapshots at important moments: decisions, milestones, blockers, direction changes, and handoffs. Each checkpoint has a title, summary, and embedding for semantic search. This gives future sessions a high-signal trail of what happened and why.
 
-11. **Git context** — `git_context` shells out to `git` (searching upward for the repo root) and returns up to four sections: uncommitted changes from `git status --short`, recent commits from `git log --oneline`, changed files since a ref, and an optional `git diff HEAD` (truncated to 200 lines). Each file in the status section is annotated with `[indexed]` or `[not indexed]` by checking the RAG file table. Returns `"Not a git repository."` gracefully in non-git directories.
+11. **Code annotations** — `annotate` stores notes in a dedicated `annotations` table, embedded at write time for semantic search. Notes are keyed by `(path, symbol_name)` so calling again updates rather than duplicates. `get_annotations` retrieves by file path or searches semantically. `read_relevant` automatically surfaces relevant notes as `[NOTE]` blocks above matching chunks — file-level notes for any chunk from that file, symbol-level notes only when the entity name matches.
+
+Example: after annotating `src/db.ts` on symbol `RagDB` with "not thread-safe — don't share across requests", a `read_relevant("database constructor")` result looks like:
+
+```
+[0.91] src/db.ts:108-138  •  RagDB
+[NOTE (RagDB)] not thread-safe — don't share across requests
+export class RagDB {
+  private db: Database;
+  ...
+```
+
+12. **Git context** — `git_context` shells out to `git` (searching upward for the repo root) and returns up to four sections: uncommitted changes from `git status --short`, recent commits from `git log --oneline`, changed files since a ref, and an optional `git diff HEAD` (truncated to 200 lines). Each file in the status section is annotated with `[indexed]` or `[not indexed]` by checking the RAG file table. Returns `"Not a git repository."` gracefully in non-git directories.
 
 Example output:
 

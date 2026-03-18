@@ -3,7 +3,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { RagDB } from "./db";
+import { RagDB, type AnnotationRow } from "./db";
 import { loadConfig } from "./config";
 import { indexDirectory } from "./indexer";
 import { search, searchChunks } from "./search";
@@ -128,7 +128,21 @@ server.tool(
       .map((r) => {
         const lineRange = r.startLine != null && r.endLine != null ? `:${r.startLine}-${r.endLine}` : "";
         const entity = r.entityName ? `  •  ${r.entityName}` : "";
-        return `[${r.score.toFixed(2)}] ${r.path}${lineRange}${entity}\n${r.content}`;
+        const header = `[${r.score.toFixed(2)}] ${r.path}${lineRange}${entity}`;
+
+        // Surface annotations for this file (and matching entity if applicable)
+        const fileAnnotations = ragDb.getAnnotations(r.path);
+        const relevant = fileAnnotations.filter(
+          (a) => a.symbolName == null || a.symbolName === r.entityName
+        );
+        const noteBlock = relevant.length > 0
+          ? relevant.map((a) => {
+              const target = a.symbolName ? ` (${a.symbolName})` : "";
+              return `[NOTE${target}] ${a.note}`;
+            }).join("\n") + "\n"
+          : "";
+
+        return `${header}\n${noteBlock}${r.content}`;
       })
       .join("\n\n---\n\n");
 
@@ -703,6 +717,90 @@ server.tool(
     return {
       content: [{ type: "text" as const, text: lines.join("\n") }],
     };
+  }
+);
+
+server.tool(
+  "annotate",
+  "Attach a persistent note to a file or specific symbol. Notes survive sessions and surface inline in read_relevant results. Use for: known issues, caveats, architectural decisions tied to specific code, or 'don't change this until X lands'. Calling again with the same path+symbol updates the existing note.",
+  {
+    path: z.string().describe("File path (relative to project root) the note applies to"),
+    note: z.string().describe("The note text"),
+    symbol: z
+      .string()
+      .optional()
+      .describe("Symbol name (function, class, etc.) the note applies to — omit for file-level notes"),
+    author: z
+      .string()
+      .optional()
+      .describe("Label for who wrote the note — e.g. 'agent', 'human' (default: 'agent')"),
+    directory: z
+      .string()
+      .optional()
+      .describe("Project directory. Defaults to RAG_PROJECT_DIR env or cwd"),
+  },
+  async ({ path, note, symbol, author, directory }) => {
+    const projectDir = directory || process.env.RAG_PROJECT_DIR || process.cwd();
+    const ragDb = getDB(projectDir);
+
+    const embText = symbol ? `${symbol}: ${note}` : note;
+    const embedding = await embed(embText);
+    const id = ragDb.upsertAnnotation(path, note, embedding, symbol ?? null, author ?? "agent");
+
+    const target = symbol ? `${path}  •  ${symbol}` : path;
+    return {
+      content: [{ type: "text" as const, text: `Annotation #${id} saved for ${target}` }],
+    };
+  }
+);
+
+server.tool(
+  "get_annotations",
+  "Retrieve persistent notes attached to files or symbols. Pass path to get all notes for a file. Pass query to search semantically across all annotations. Pass both to filter by file and rank by relevance.",
+  {
+    path: z
+      .string()
+      .optional()
+      .describe("File path to retrieve annotations for"),
+    query: z
+      .string()
+      .optional()
+      .describe("Semantic search query — finds annotations by meaning across all files"),
+    directory: z
+      .string()
+      .optional()
+      .describe("Project directory. Defaults to RAG_PROJECT_DIR env or cwd"),
+  },
+  async ({ path, query, directory }) => {
+    const projectDir = directory || process.env.RAG_PROJECT_DIR || process.cwd();
+    const ragDb = getDB(projectDir);
+
+    let results: AnnotationRow[];
+    if (query) {
+      const embedding = await embed(query);
+      const searchResults = ragDb.searchAnnotations(embedding, 10);
+      results = path ? searchResults.filter((r) => r.path === path) : searchResults;
+    } else if (path) {
+      results = ragDb.getAnnotations(path);
+    } else {
+      results = ragDb.getAnnotations();
+    }
+
+    if (results.length === 0) {
+      return {
+        content: [{ type: "text" as const, text: "No annotations found." }],
+      };
+    }
+
+    const text = results
+      .map((r) => {
+        const target = r.symbolName ? `${r.path}  •  ${r.symbolName}` : r.path;
+        const authorStr = r.author ? ` [${r.author}]` : "";
+        return `#${r.id}  ${target}${authorStr}\n  ${r.note}\n  (${r.updatedAt})`;
+      })
+      .join("\n\n");
+
+    return { content: [{ type: "text" as const, text }] };
   }
 );
 
