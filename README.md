@@ -520,6 +520,7 @@ Detected by basename — exact match or prefix match (e.g. `Dockerfile.dev` and 
 | `.proto` | Split on blank-line blocks (message, service, enum definitions). |
 | `.graphql` `.gql` | Split on blank-line blocks (type, query, mutation, fragment definitions). |
 | `.sql` | Split on `;`-terminated statement boundaries. |
+| `.mod` | Split on blank-line blocks (`go.mod` `require`, `replace`, `exclude` directives). |
 
 | Extensions | Chunking strategy |
 |---|---|

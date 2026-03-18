@@ -41,6 +41,7 @@ export const KNOWN_EXTENSIONS = new Set([
   ".c", ".cpp", ".h", ".hpp", ".rb", ".swift",
   ".sh", ".bash", ".zsh", ".fish",
   ".tf", ".proto", ".graphql", ".gql",
+  ".mod",
   ".xml",
   // Virtual extensions for basename-detected files
   ".makefile", ".dockerfile", ".jenkinsfile",
@@ -100,6 +101,7 @@ export async function chunkText(
     ".java", ".c", ".cpp", ".h", ".hpp", ".rb", ".swift",
     ".sh", ".bash", ".zsh", ".fish",
     ".tf", ".proto", ".graphql", ".gql",
+    ".mod",
     ".jenkinsfile", ".vagrantfile", ".gemfile", ".rakefile", ".brewfile", ".procfile",
     ".xml",
   ].includes(extension);
