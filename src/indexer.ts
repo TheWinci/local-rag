@@ -57,17 +57,26 @@ function matchesAny(filePath: string, patterns: string[]): boolean {
 
 async function collectFiles(
   directory: string,
-  config: RagConfig
+  config: RagConfig,
+  onWarning?: (msg: string) => void
 ): Promise<string[]> {
   const matched: string[] = [];
 
   for (const pattern of config.include) {
     const glob = new Glob(pattern);
-    for await (const file of glob.scan({ cwd: directory, absolute: true })) {
-      const rel = relative(directory, file);
-      if (!matchesAny(rel, config.exclude)) {
-        matched.push(file);
+    try {
+      for await (const file of glob.scan({ cwd: directory, absolute: true })) {
+        const rel = relative(directory, file);
+        if (!matchesAny(rel, config.exclude)) {
+          matched.push(file);
+        }
       }
+    } catch (err: any) {
+      if (err.code === "EPERM" || err.code === "EACCES") {
+        onWarning?.(`Skipping inaccessible path (${err.code}): ${err.path ?? pattern}`);
+        continue;
+      }
+      throw err;
     }
   }
 
@@ -140,7 +149,7 @@ export async function indexDirectory(
 ): Promise<IndexResult> {
   const result: IndexResult = { indexed: 0, skipped: 0, pruned: 0, errors: [] };
 
-  const matchedFiles = await collectFiles(directory, config);
+  const matchedFiles = await collectFiles(directory, config, onProgress);
 
   onProgress?.(`Found ${matchedFiles.length} files to index`);
 

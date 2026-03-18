@@ -45,10 +45,7 @@ Works with any [MCP](https://modelcontextprotocol.io/)-compatible client. Add th
   "mcpServers": {
     "local-rag": {
       "command": "bunx",
-      "args": ["local-rag-mcp"],
-      "env": {
-        "RAG_PROJECT_DIR": "/path/to/your/project"
-      }
+      "args": ["local-rag-mcp"]
     }
   }
 }
@@ -56,7 +53,13 @@ Works with any [MCP](https://modelcontextprotocol.io/)-compatible client. Add th
 
 > **VS Code note:** Uses `"servers"` instead of `"mcpServers"` and requires `"type": "stdio"` on the server object.
 
-Omit `RAG_PROJECT_DIR` for per-project configs — the server uses cwd.
+**Read-only project directory?** Set `RAG_DB_DIR` to redirect the index to a writable path:
+
+```json
+"env": {
+  "RAG_DB_DIR": "/tmp/my-project-rag"
+}
+```
 
 ### Auto-indexing
 

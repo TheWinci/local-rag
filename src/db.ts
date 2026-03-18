@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import * as sqliteVec from "sqlite-vec";
 import { EMBEDDING_DIM } from "./embed";
-import { join } from "path";
+import { join, resolve } from "path";
 import { mkdirSync, existsSync } from "fs";
 import { platform } from "os";
 
@@ -91,8 +91,27 @@ export class RagDB {
   private db: Database;
 
   constructor(projectDir: string) {
-    const ragDir = join(projectDir, ".rag");
-    mkdirSync(ragDir, { recursive: true });
+    // RAG_DB_DIR lets users decouple the index location from the project
+    // directory — useful when the project lives on a read-only filesystem.
+    const ragDir = process.env.RAG_DB_DIR
+      ? resolve(process.env.RAG_DB_DIR)
+      : join(projectDir, ".rag");
+
+    try {
+      mkdirSync(ragDir, { recursive: true });
+    } catch (err: any) {
+      if (err.code === "EROFS" || err.code === "EACCES") {
+        const where = process.env.RAG_DB_DIR
+          ? `RAG_DB_DIR path "${ragDir}"`
+          : `project directory "${projectDir}"`;
+        throw new Error(
+          `local-rag-mcp: cannot write to ${where} (${err.code}).\n` +
+          `Set RAG_DB_DIR to a writable directory in your MCP server config:\n` +
+          `  "env": { "RAG_DB_DIR": "/tmp/my-project-rag", "RAG_PROJECT_DIR": "..." }`
+        );
+      }
+      throw err;
+    }
 
     this.db = new Database(join(ragDir, "index.db"));
     this.db.exec("PRAGMA journal_mode=WAL");
