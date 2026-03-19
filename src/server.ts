@@ -14,7 +14,7 @@ import { discoverSessions } from "./conversation";
 import { indexConversation, startConversationTail } from "./conversation-index";
 import { resolve } from "path";
 import { homedir } from "os";
-import { runSetup } from "./setup";
+import { runSetup, mcpConfigSnippet, detectAgentHints, confirm } from "./setup";
 
 const server = new McpServer({
   name: "local-rag",
@@ -915,6 +915,28 @@ if (process.argv[2] === "init") {
   } else {
     for (const action of actions) console.log(action);
   }
+
+  // Print MCP config snippet for the user to paste
+  console.log("\nAdd this to your agent's MCP config (mcpServers):\n");
+  console.log(mcpConfigSnippet(dir));
+  const hints = detectAgentHints(dir);
+  console.log();
+  for (const hint of hints) console.log(`  ${hint}`);
+
+  // Ask if user wants to index now
+  console.log();
+  const shouldIndex = await confirm("Index project now? [Y/n] ");
+  if (shouldIndex) {
+    const db = new RagDB(dir);
+    const config = await loadConfig(dir);
+    console.log(`Indexing ${dir}...`);
+    const result = await indexDirectory(dir, db, config, console.log);
+    console.log(
+      `\nDone: ${result.indexed} indexed, ${result.skipped} skipped, ${result.pruned} pruned`
+    );
+    db.close();
+  }
+
   process.exit(0);
 }
 

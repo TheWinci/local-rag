@@ -6,10 +6,15 @@ const CLI = join(import.meta.dir, "..", "src", "cli.ts");
 let tempDir: string;
 
 async function runCLI(...args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return runCLIWithStdin(undefined, ...args);
+}
+
+async function runCLIWithStdin(stdin: string | undefined, ...args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const proc = Bun.spawn(["bun", "run", CLI, ...args], {
     cwd: tempDir,
     stdout: "pipe",
     stderr: "pipe",
+    stdin: stdin !== undefined ? new Response(stdin) : undefined,
     env: process.env,
   });
 
@@ -54,10 +59,12 @@ describe("CLI", () => {
   });
 
   test("init creates .rag/config.json and CLAUDE.md", async () => {
-    const { stdout, exitCode } = await runCLI("init", tempDir);
+    const { stdout, exitCode } = await runCLIWithStdin("n\n", "init", tempDir);
     expect(exitCode).toBe(0);
     expect(stdout).toContain(".rag/config.json");
     expect(stdout).toContain("CLAUDE.md");
+    expect(stdout).toContain("local-rag-mcp");
+    expect(stdout).toContain("RAG_PROJECT_DIR");
 
     const { existsSync } = await import("fs");
     expect(existsSync(join(tempDir, ".rag", "config.json"))).toBe(true);
@@ -65,10 +72,10 @@ describe("CLI", () => {
   });
 
   test("init is idempotent", async () => {
-    await runCLI("init", tempDir);
-    const { stdout, exitCode } = await runCLI("init", tempDir);
+    await runCLIWithStdin("n\n", "init", tempDir);
+    const { stdout, exitCode } = await runCLIWithStdin("n\n", "init", tempDir);
     expect(exitCode).toBe(0);
-    expect(stdout.trim()).toBe("Already set up — nothing to do.");
+    expect(stdout).toContain("Already set up — nothing to do.");
   });
 
   test("index reports indexed counts", async () => {

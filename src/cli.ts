@@ -3,7 +3,7 @@
 import { resolve } from "path";
 import { RagDB } from "./db";
 import { loadConfig } from "./config";
-import { runSetup } from "./setup";
+import { runSetup, mcpConfigSnippet, detectAgentHints, confirm } from "./setup";
 import { indexDirectory } from "./indexer";
 import { search, searchChunks } from "./search";
 import { loadBenchmarkQueries, runBenchmark, formatBenchmarkReport } from "./benchmark";
@@ -78,6 +78,25 @@ async function main() {
         console.log("Already set up — nothing to do.");
       } else {
         for (const action of actions) console.log(action);
+      }
+
+      console.log("\nAdd this to your agent's MCP config (mcpServers):\n");
+      console.log(mcpConfigSnippet(dir));
+      const hints = detectAgentHints(dir);
+      console.log();
+      for (const hint of hints) console.log(`  ${hint}`);
+
+      console.log();
+      const shouldIndex = await confirm("Index project now? [Y/n] ");
+      if (shouldIndex) {
+        const db = new RagDB(dir);
+        const config = await loadConfig(dir);
+        console.log(`Indexing ${dir}...`);
+        const result = await indexDirectory(dir, db, config, console.log);
+        console.log(
+          `\nDone: ${result.indexed} indexed, ${result.skipped} skipped, ${result.pruned} pruned`
+        );
+        db.close();
       }
       break;
     }

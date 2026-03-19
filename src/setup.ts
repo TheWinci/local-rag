@@ -1,6 +1,7 @@
 import { existsSync } from "fs";
 import { readFile, writeFile, mkdir } from "fs/promises";
-import { join } from "path";
+import { join, resolve } from "path";
+import { createInterface } from "readline";
 import { writeDefaultConfig } from "./config";
 
 const MARKER = "<!-- local-rag-mcp -->";
@@ -139,6 +140,40 @@ export async function ensureAgentInstructions(projectDir: string): Promise<strin
   }
 
   return actions;
+}
+
+export function mcpConfigSnippet(projectDir: string): string {
+  const abs = resolve(projectDir);
+  return JSON.stringify({
+    "local-rag-mcp": {
+      command: "bunx",
+      args: ["local-rag-mcp@latest"],
+      env: { RAG_PROJECT_DIR: abs },
+    },
+  }, null, 2);
+}
+
+export function detectAgentHints(projectDir: string): string[] {
+  const hints: string[] = [];
+  if (existsSync(join(projectDir, ".mcp.json")))
+    hints.push("Claude Code:  add to .mcp.json → mcpServers");
+  if (existsSync(join(projectDir, ".cursor")))
+    hints.push("Cursor:       add to .cursor/mcp.json → mcpServers");
+  if (existsSync(join(projectDir, ".windsurf")))
+    hints.push("Windsurf:     add to .windsurf/mcp.json → mcpServers");
+  if (hints.length === 0)
+    hints.push("Add to your agent's MCP config under mcpServers:");
+  return hints;
+}
+
+export function confirm(question: string): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((res) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      res(answer.trim().toLowerCase() !== "n");
+    });
+  });
 }
 
 export async function runSetup(projectDir: string): Promise<SetupResult> {
