@@ -906,6 +906,18 @@ server.tool(
   }
 );
 
+// init subcommand: bunx local-rag-mcp@latest init [dir]
+if (process.argv[2] === "init") {
+  const dir = process.argv[3] ? resolve(process.argv[3]) : process.cwd();
+  const { actions } = await runSetup(dir);
+  if (actions.length === 0) {
+    console.log("Already set up — nothing to do.");
+  } else {
+    for (const action of actions) console.log(action);
+  }
+  process.exit(0);
+}
+
 // Auto-index on startup + start file watcher
 const startupDir = process.env.RAG_PROJECT_DIR || process.cwd();
 
@@ -986,18 +998,6 @@ function cleanup() {
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 process.on("SIGHUP", cleanup);
-
-// init subcommand: bunx local-rag-mcp@latest init [dir]
-if (process.argv[2] === "init") {
-  const dir = process.argv[3] ? resolve(process.argv[3]) : process.cwd();
-  const { actions } = await runSetup(dir);
-  if (actions.length === 0) {
-    console.log("Already set up — nothing to do.");
-  } else {
-    for (const action of actions) console.log(action);
-  }
-  process.exit(0);
-}
 
 // Start server
 const transport = new StdioServerTransport();
