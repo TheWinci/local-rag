@@ -1,5 +1,6 @@
 import { embed } from "../embeddings/embed";
 import { RagDB, type SearchResult, type ChunkSearchResult } from "../db";
+import { log } from "../utils/log";
 
 export interface DedupedResult {
   path: string;
@@ -38,8 +39,8 @@ export async function search(
   let textResults: typeof vectorResults = [];
   try {
     textResults = db.textSearch(query, topK * 3);
-  } catch {
-    // FTS query may fail on special characters — fall back to vector-only
+  } catch (err) {
+    log.debug(`FTS query failed, falling back to vector-only: ${err instanceof Error ? err.message : err}`, "search");
   }
 
   // Merge scores: hybridWeight * vector + (1 - hybridWeight) * bm25

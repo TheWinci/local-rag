@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, beforeEach, afterEach } from "bun:te
 import { RagDB } from "../../src/db";
 import { embed, getEmbedder } from "../../src/embeddings/embed";
 import { chunkText } from "../../src/indexing/chunker";
-import { resolveImports, generateMermaid } from "../../src/graph/resolver";
+import { resolveImports, generateProjectMap } from "../../src/graph/resolver";
 import { createTempDir, cleanupTempDir, writeFixture } from "../helpers";
 import { join } from "path";
 
@@ -193,8 +193,8 @@ describe("resolveImports", () => {
   });
 });
 
-describe("generateMermaid", () => {
-  test("generates file-level graph", () => {
+describe("generateProjectMap", () => {
+  test("generates file-level map", () => {
     const emb = new Float32Array(384);
     const pathA = join(tempDir, "src", "server.ts");
     const pathB = join(tempDir, "src", "db.ts");
@@ -209,15 +209,16 @@ describe("generateMermaid", () => {
     db.upsertFileGraph(b.id, [], [{ name: "RagDB", type: "class" }]);
     db.resolveImport(db.getImportsForFile(a.id)[0].id, b.id);
 
-    const mermaid = generateMermaid(db, { projectDir: tempDir, zoom: "file" });
+    const map = generateProjectMap(db, { projectDir: tempDir, zoom: "file" });
 
-    expect(mermaid).toContain("graph TD");
-    expect(mermaid).toContain("server.ts");
-    expect(mermaid).toContain("db.ts");
-    expect(mermaid).toContain("-->");
+    expect(map).toContain("Project Map");
+    expect(map).toContain("server.ts");
+    expect(map).toContain("db.ts");
+    expect(map).toContain("depends_on:");
+    expect(map).toContain("depended_on_by:");
   });
 
-  test("generates directory-level graph", () => {
+  test("generates directory-level map", () => {
     const emb = new Float32Array(384);
     const pathA = join(tempDir, "src", "server.ts");
     const pathB = join(tempDir, "lib", "db.ts");
@@ -232,12 +233,13 @@ describe("generateMermaid", () => {
     db.upsertFileGraph(b.id, [], []);
     db.resolveImport(db.getImportsForFile(a.id)[0].id, b.id);
 
-    const mermaid = generateMermaid(db, { projectDir: tempDir, zoom: "directory" });
+    const map = generateProjectMap(db, { projectDir: tempDir, zoom: "directory" });
 
-    expect(mermaid).toContain("graph TD");
-    expect(mermaid).toContain("src/");
-    expect(mermaid).toContain("lib/");
-    expect(mermaid).toContain("-->");
+    expect(map).toContain("directory-level");
+    expect(map).toContain("src/");
+    expect(map).toContain("lib/");
+    expect(map).toContain("Dependencies");
+    expect(map).toContain("src -> lib");
   });
 
   test("focused subgraph filters to nearby files", () => {
@@ -259,16 +261,16 @@ describe("generateMermaid", () => {
     db.resolveImport(db.getImportsForFile(a.id)[0].id, b.id);
 
     // Focus on a.ts with 1 hop: should include a and b but not c
-    const mermaid = generateMermaid(db, { projectDir: tempDir, focus: "a.ts", maxHops: 1 });
+    const map = generateProjectMap(db, { projectDir: tempDir, focus: "a.ts", maxHops: 1 });
 
-    expect(mermaid).toContain("a.ts");
-    expect(mermaid).toContain("b.ts");
-    expect(mermaid).not.toContain("c.ts");
+    expect(map).toContain("a.ts");
+    expect(map).toContain("b.ts");
+    expect(map).not.toContain("c.ts");
   });
 
   test("returns placeholder for empty graph", () => {
-    const mermaid = generateMermaid(db, { projectDir: tempDir });
-    expect(mermaid).toContain("No files indexed");
+    const map = generateProjectMap(db, { projectDir: tempDir });
+    expect(map).toContain("No files indexed");
   });
 
   test("handles circular dependencies", () => {
@@ -288,12 +290,12 @@ describe("generateMermaid", () => {
     db.resolveImport(db.getImportsForFile(b.id)[0].id, a.id);
 
     // Should not infinite loop
-    const mermaid = generateMermaid(db, { projectDir: tempDir });
-    expect(mermaid).toContain("graph TD");
-    expect(mermaid).toContain("-->");
+    const map = generateProjectMap(db, { projectDir: tempDir });
+    expect(map).toContain("Project Map");
+    expect(map).toContain("depends_on:");
   });
 
-  test("entry points get distinct style", () => {
+  test("entry points listed separately", () => {
     const emb = new Float32Array(384);
     const pathServer = join(tempDir, "server.ts");
     const pathDb = join(tempDir, "db.ts");
@@ -308,10 +310,10 @@ describe("generateMermaid", () => {
     db.upsertFileGraph(dbFile.id, [], [{ name: "RagDB", type: "class" }]);
     db.resolveImport(db.getImportsForFile(server.id)[0].id, dbFile.id);
 
-    const mermaid = generateMermaid(db, { projectDir: tempDir });
+    const map = generateProjectMap(db, { projectDir: tempDir });
 
-    // server.ts has no importers → entry point → gets styled
-    expect(mermaid).toContain("style");
-    expect(mermaid).toContain("server_ts");
+    // server.ts has no importers → entry point
+    expect(map).toContain("Entry Points");
+    expect(map).toContain("server.ts");
   });
 });

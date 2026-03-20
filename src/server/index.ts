@@ -9,7 +9,10 @@ import { startWatcher, type Watcher } from "../indexing/watcher";
 import { discoverSessions } from "../conversation/parser";
 import { indexConversation, startConversationTail } from "../conversation/indexer";
 import { registerAllTools } from "../tools";
-import { runSetup, mcpConfigSnippet, detectAgentHints, confirm } from "../cli/setup";
+import { log } from "../utils/log";
+
+// Read version from package.json at module load time
+const { version } = await import("../../package.json");
 
 // Lazy-init DB per project directory — keep all open to avoid
 // closing a DB that background tasks (auto-index, watcher) still use.
@@ -27,46 +30,11 @@ function getDB(projectDir: string): RagDB {
 export async function startServer() {
   const server = new McpServer({
     name: "local-rag",
-    version: "0.1.0",
+    version,
   });
 
   // Register all MCP tools
   registerAllTools(server, getDB);
-
-  // init subcommand: bunx local-rag-mcp@latest init [dir]
-  if (process.argv[2] === "init") {
-    const dir = process.argv[3] ? resolve(process.argv[3]) : process.cwd();
-    const { actions } = await runSetup(dir);
-    if (actions.length === 0) {
-      console.log("Already set up — nothing to do.");
-    } else {
-      for (const action of actions) console.log(action);
-    }
-
-    // Print MCP config snippet for the user to paste
-    console.log("\nAdd this to your agent's MCP config (mcpServers):\n");
-    console.log(mcpConfigSnippet(dir));
-    const hints = detectAgentHints(dir);
-    console.log();
-    for (const hint of hints) console.log(`  ${hint}`);
-
-    // Ask if user wants to index now
-    console.log();
-    const shouldIndex = await confirm("Index project now? [Y/n] ");
-    if (shouldIndex) {
-      const db = new RagDB(dir);
-      const config = await loadConfig(dir);
-      console.log(`Indexing ${dir}...`);
-      const { cliProgress } = await import("../cli/progress");
-      const result = await indexDirectory(dir, db, config, cliProgress);
-      console.log(
-        `\nDone: ${result.indexed} indexed, ${result.skipped} skipped, ${result.pruned} pruned`
-      );
-      db.close();
-    }
-
-    process.exit(0);
-  }
 
   // Auto-index on startup + start file watcher
   const startupDir = process.env.RAG_PROJECT_DIR || process.cwd();
@@ -129,8 +97,8 @@ export async function startServer() {
               `[local-rag] Indexed past session ${session.sessionId.slice(0, 8)}...: ${result.turnsIndexed} turns\n`
             );
           }
-        }).catch(() => {
-          // Non-critical — skip broken transcripts
+        }).catch((err) => {
+          log.warn(`Failed to index session ${session.sessionId.slice(0, 8)}: ${err instanceof Error ? err.message : err}`, "conversation");
         });
       }
     }

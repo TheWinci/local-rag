@@ -112,9 +112,10 @@ interface GraphEdge {
 }
 
 /**
- * Generate a Mermaid dependency graph from the stored import/export data.
+ * Generate a structured text dependency map optimized for AI agent consumption.
+ * Replaces the old Mermaid format with a more parseable, information-dense output.
  */
-export function generateMermaid(
+export function generateProjectMap(
   db: RagDB,
   options: GraphOptions
 ): string {
@@ -129,12 +130,10 @@ export function generateMermaid(
   let graph: { nodes: GraphNode[]; edges: GraphEdge[] };
 
   if (focus) {
-    // Find the focused file(s)
     const file = db.getFileByPath(resolve(projectDir, focus));
     if (file) {
       graph = db.getSubgraph([file.id], maxHops);
     } else {
-      // No exact match — return empty graph
       graph = { nodes: [], edges: [] };
     }
   } else {
@@ -142,97 +141,143 @@ export function generateMermaid(
   }
 
   if (graph.nodes.length === 0) {
-    return "graph TD\n  empty[\"No files indexed or no dependencies found\"]";
+    return "No files indexed or no dependencies found.";
   }
 
   // Auto-switch to directory view if too many nodes
   const effectiveZoom = graph.nodes.length > maxNodes ? "directory" : zoom;
 
   if (effectiveZoom === "directory") {
-    return generateDirectoryMermaid(graph, projectDir);
+    return generateDirectoryMap(graph, projectDir);
   }
 
-  return generateFileMermaid(graph, projectDir);
+  return generateFileMap(graph, projectDir);
 }
 
-function sanitizeId(path: string): string {
-  return path.replace(/[^a-zA-Z0-9]/g, "_");
-}
 
-function generateFileMermaid(
+function generateFileMap(
   graph: { nodes: GraphNode[]; edges: GraphEdge[] },
   projectDir: string
 ): string {
-  const lines: string[] = ["graph TD"];
+  // Build adjacency maps
+  const dependsOn = new Map<number, string[]>();
+  const dependedOnBy = new Map<number, string[]>();
+  const idToRel = new Map<number, string>();
 
-  // Determine entry points (nodes with no incoming edges)
-  const hasIncoming = new Set<number>();
-  for (const edge of graph.edges) {
-    hasIncoming.add(edge.toId);
-  }
-
-  // Node definitions
   for (const node of graph.nodes) {
     const relPath = relative(projectDir, node.path);
-    const id = sanitizeId(relPath);
-    const topExports = node.exports.slice(0, 3);
-    const exportLines = topExports.map((e) => `+ ${e.name}`).join("\\n");
-    const label = exportLines ? `${relPath}\\n${exportLines}` : relPath;
-    lines.push(`  ${id}["${label}"]`);
+    idToRel.set(node.id, relPath);
+    dependsOn.set(node.id, []);
+    dependedOnBy.set(node.id, []);
   }
 
-  // Edges
   for (const edge of graph.edges) {
-    const fromRel = relative(projectDir, edge.fromPath);
-    const toRel = relative(projectDir, edge.toPath);
-    lines.push(`  ${sanitizeId(fromRel)} --> ${sanitizeId(toRel)}`);
+    const fromRel = idToRel.get(edge.fromId);
+    const toRel = idToRel.get(edge.toId);
+    if (fromRel && toRel) {
+      dependsOn.get(edge.fromId)!.push(toRel);
+      dependedOnBy.get(edge.toId)!.push(fromRel);
+    }
   }
 
-  // Style entry points
+  // Identify entry points (no importers)
+  const entryPoints: GraphNode[] = [];
+  const otherNodes: GraphNode[] = [];
+
   for (const node of graph.nodes) {
-    if (!hasIncoming.has(node.id)) {
-      const relPath = relative(projectDir, node.path);
-      lines.push(`  style ${sanitizeId(relPath)} fill:#e1f5fe,stroke:#0288d1`);
+    if (dependedOnBy.get(node.id)!.length === 0) {
+      entryPoints.push(node);
+    } else {
+      otherNodes.push(node);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`## Project Map (file-level, ${graph.nodes.length} files)\n`);
+
+  function formatNode(node: GraphNode) {
+    const relPath = idToRel.get(node.id)!;
+    lines.push(`  ${relPath}`);
+
+    if (node.exports.length > 0) {
+      const exps = node.exports
+        .slice(0, 8)
+        .map((e) => `${e.name} (${e.type})`)
+        .join(", ");
+      const suffix = node.exports.length > 8 ? `, +${node.exports.length - 8} more` : "";
+      lines.push(`    exports: ${exps}${suffix}`);
+    }
+
+    const deps = dependsOn.get(node.id)!;
+    if (deps.length > 0) {
+      lines.push(`    depends_on: ${deps.join(", ")}`);
+    }
+
+    const importers = dependedOnBy.get(node.id)!;
+    if (importers.length > 0) {
+      lines.push(`    depended_on_by: ${importers.join(", ")}`);
+    }
+  }
+
+  if (entryPoints.length > 0) {
+    lines.push(`### Entry Points (no importers)`);
+    for (const node of entryPoints) {
+      formatNode(node);
+    }
+    lines.push("");
+  }
+
+  if (otherNodes.length > 0) {
+    lines.push(`### Files`);
+    for (const node of otherNodes) {
+      formatNode(node);
     }
   }
 
   return lines.join("\n");
 }
 
-function generateDirectoryMermaid(
+function generateDirectoryMap(
   graph: { nodes: GraphNode[]; edges: GraphEdge[] },
   projectDir: string
 ): string {
-  const lines: string[] = ["graph TD"];
-
   // Group nodes by directory
-  const dirFiles = new Map<string, number>();
+  const dirFiles = new Map<string, string[]>();
   const nodeToDir = new Map<number, string>();
 
   for (const node of graph.nodes) {
     const relPath = relative(projectDir, node.path);
     const dir = dirname(relPath) || ".";
-    dirFiles.set(dir, (dirFiles.get(dir) || 0) + 1);
     nodeToDir.set(node.id, dir);
+    if (!dirFiles.has(dir)) dirFiles.set(dir, []);
+    dirFiles.get(dir)!.push(basename(relPath));
   }
 
-  // Directory nodes
-  for (const [dir, count] of dirFiles) {
-    const id = sanitizeId(dir);
-    lines.push(`  ${id}["${dir}/ (${count} files)"]`);
-  }
-
-  // Directory edges (deduplicated)
-  const dirEdges = new Set<string>();
+  // Directory-level edges (deduplicated with count)
+  const dirEdgeCounts = new Map<string, number>();
   for (const edge of graph.edges) {
     const fromDir = nodeToDir.get(edge.fromId)!;
     const toDir = nodeToDir.get(edge.toId)!;
     if (fromDir !== toDir) {
-      const key = `${fromDir}->${toDir}`;
-      if (!dirEdges.has(key)) {
-        dirEdges.add(key);
-        lines.push(`  ${sanitizeId(fromDir)} --> ${sanitizeId(toDir)}`);
-      }
+      const key = `${fromDir} -> ${toDir}`;
+      dirEdgeCounts.set(key, (dirEdgeCounts.get(key) || 0) + 1);
+    }
+  }
+
+  const lines: string[] = [];
+  lines.push(`## Project Map (directory-level, ${dirFiles.size} directories)\n`);
+
+  lines.push("### Directories");
+  for (const [dir, files] of dirFiles) {
+    lines.push(`  ${dir}/ (${files.length} files)`);
+    lines.push(`    files: ${files.join(", ")}`);
+  }
+
+  if (dirEdgeCounts.size > 0) {
+    lines.push("");
+    lines.push("### Dependencies");
+    for (const [edge, count] of dirEdgeCounts) {
+      lines.push(`  ${edge} (${count} import${count !== 1 ? "s" : ""})`);
     }
   }
 

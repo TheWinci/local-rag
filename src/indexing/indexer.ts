@@ -7,14 +7,16 @@ import { embedBatch } from "../embeddings/embed";
 import { chunkText, KNOWN_EXTENSIONS, type ChunkImport, type ChunkExport } from "./chunker";
 import { RagDB } from "../db";
 import { type RagConfig } from "../config";
-import { resolveImports, resolveImportsForFile } from "../graph/resolver";
+import { resolveImports } from "../graph/resolver";
+import { log } from "../utils/log";
+import { type EmbeddedChunk } from "../types";
 
 function aggregateGraphData(chunks: { imports?: ChunkImport[]; exports?: ChunkExport[] }[]): {
   imports: { name: string; source: string }[];
   exports: { name: string; type: string }[];
 } {
-  const importMap = new Map<string, string>(); // source → names
-  const exportMap = new Map<string, string>(); // name → type
+  const importMap = new Map<string, string>();
+  const exportMap = new Map<string, string>();
 
   for (const chunk of chunks) {
     if (chunk.imports) {
@@ -83,9 +85,107 @@ async function collectFiles(
   }
 
   const results = await Promise.all(config.include.map(scanPattern));
-
-  // Deduplicate (a file might match multiple include patterns)
   return [...new Set(results.flat())];
+}
+
+interface ProcessFileOptions {
+  config: RagConfig;
+  /** Base directory for relative path display */
+  baseDir?: string;
+  onProgress?: (msg: string, opts?: { transient?: boolean }) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * Shared file processing pipeline: hash → parse → chunk → embed → write to DB.
+ * Streams DB writes alongside embedding to cap memory at one batch (~50 chunks)
+ * instead of buffering all embeddings.
+ */
+async function processFile(
+  filePath: string,
+  db: RagDB,
+  opts: ProcessFileOptions
+): Promise<"indexed" | "skipped"> {
+  const { config, baseDir, onProgress, signal } = opts;
+  const batchSize = config.indexBatchSize ?? 50;
+
+  const hash = await fileHash(filePath);
+  const existing = db.getFileByPath(filePath);
+
+  if (existing && existing.hash === hash) {
+    return "skipped";
+  }
+
+  const relPath = baseDir ? relative(baseDir, filePath) : filePath;
+  onProgress?.(`Indexing ${relPath}`);
+
+  const parsed = await parseFile(filePath);
+
+  if (!KNOWN_EXTENSIONS.has(parsed.extension)) {
+    onProgress?.(`Skipped (unsupported extension "${parsed.extension}"): ${relPath}`);
+    return "skipped";
+  }
+
+  if (!parsed.content.trim()) {
+    return "skipped";
+  }
+
+  const chunks = await chunkText(
+    parsed.content,
+    parsed.extension,
+    config.chunkSize,
+    config.chunkOverlap,
+    filePath
+  );
+
+  if (chunks.length > 10000) {
+    log.warn(`Large file: ${relPath} produced ${chunks.length} chunks`, "indexer");
+  }
+
+  // Stream: embed each batch and write to DB immediately (caps memory at one batch)
+  const DB_BATCH = 500;
+  const fileId = db.upsertFileStart(filePath, hash);
+  let chunkOffset = 0;
+  let pendingDbChunks: EmbeddedChunk[] = [];
+
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    if (signal?.aborted) break;
+
+    const batch = chunks.slice(i, i + batchSize);
+    const embeddings = await embedBatch(batch.map(c => c.text), config.indexThreads);
+
+    for (let j = 0; j < batch.length; j++) {
+      const chunk = batch[j];
+      const primaryExport = chunk.exports?.[0];
+      pendingDbChunks.push({
+        snippet: chunk.text,
+        embedding: embeddings[j],
+        entityName: primaryExport?.name ?? null,
+        chunkType: primaryExport?.type ?? null,
+        startLine: chunk.startLine ?? null,
+        endLine: chunk.endLine ?? null,
+      });
+    }
+
+    // Flush to DB when we hit DB_BATCH size or on last iteration
+    if (pendingDbChunks.length >= DB_BATCH || i + batchSize >= chunks.length) {
+      if (signal?.aborted) break;
+      db.insertChunkBatch(fileId, pendingDbChunks, chunkOffset);
+      onProgress?.(`Writing ${Math.min(chunkOffset + pendingDbChunks.length, chunks.length)}/${chunks.length} chunks for ${relPath}`, { transient: true });
+      chunkOffset += pendingDbChunks.length;
+      pendingDbChunks = [];
+      await Bun.sleep(0);
+    }
+  }
+
+  if (signal?.aborted) return "skipped";
+
+  // Store graph metadata
+  const graphData = aggregateGraphData(chunks);
+  db.upsertFileGraph(fileId, graphData.imports, graphData.exports);
+
+  onProgress?.(`Indexed: ${relPath} (${chunks.length} chunks)`);
+  return "indexed";
 }
 
 /**
@@ -97,61 +197,9 @@ export async function indexFile(
   config: RagConfig
 ): Promise<"indexed" | "skipped" | "error"> {
   try {
-    const hash = await fileHash(filePath);
-    const existing = db.getFileByPath(filePath);
-
-    if (existing && existing.hash === hash) {
-      return "skipped";
-    }
-
-    const parsed = await parseFile(filePath);
-
-    if (!KNOWN_EXTENSIONS.has(parsed.extension)) {
-      return "skipped";
-    }
-
-    if (!parsed.content.trim()) {
-      return "skipped";
-    }
-
-    const chunks = await chunkText(
-      parsed.content,
-      parsed.extension,
-      config.chunkSize,
-      config.chunkOverlap,
-      filePath
-    );
-
-    const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null; startLine?: number | null; endLine?: number | null }[] = [];
-    for (let i = 0; i < chunks.length; i += config.indexBatchSize ?? 50) {
-      const batch = chunks.slice(i, i + (config.indexBatchSize ?? 50));
-      const embeddings = await embedBatch(batch.map(c => c.text), config.indexThreads);
-      for (let j = 0; j < batch.length; j++) {
-        const chunk = batch[j];
-        const primaryExport = chunk.exports?.[0];
-        embeddedChunks.push({
-          snippet: chunk.text,
-          embedding: embeddings[j],
-          entityName: primaryExport?.name ?? null,
-          chunkType: primaryExport?.type ?? null,
-          startLine: chunk.startLine ?? null,
-          endLine: chunk.endLine ?? null,
-        });
-      }
-      await Bun.sleep(0);
-    }
-
-    db.upsertFile(filePath, hash, embeddedChunks);
-
-    // Store graph metadata (imports/exports)
-    const graphData = aggregateGraphData(chunks);
-    const file = db.getFileByPath(filePath);
-    if (file) {
-      db.upsertFileGraph(file.id, graphData.imports, graphData.exports);
-    }
-
-    return "indexed";
-  } catch {
+    return await processFile(filePath, db, { config });
+  } catch (err) {
+    log.warn(`Failed to index ${filePath}: ${err instanceof Error ? err.message : err}`, "indexFile");
     return "error";
   }
 }
@@ -171,84 +219,22 @@ export async function indexDirectory(
 
   onProgress?.(`Found ${matchedFiles.length} files to index`);
 
-  // Index each file
   for (const filePath of matchedFiles) {
     if (signal?.aborted) break;
 
     try {
-      const hash = await fileHash(filePath);
-      const existing = db.getFileByPath(filePath);
+      const status = await processFile(filePath, db, {
+        config,
+        baseDir: directory,
+        onProgress,
+        signal,
+      });
 
-      if (existing && existing.hash === hash) {
+      if (status === "indexed") {
+        result.indexed++;
+      } else {
         result.skipped++;
-        continue;
       }
-
-      onProgress?.(`Indexing ${relative(directory, filePath)}`);
-      const parsed = await parseFile(filePath);
-
-      if (!KNOWN_EXTENSIONS.has(parsed.extension)) {
-        onProgress?.(`Skipped (unsupported extension "${parsed.extension}"): ${relative(directory, filePath)}`);
-        result.skipped++;
-        continue;
-      }
-
-      if (!parsed.content.trim()) {
-        result.skipped++;
-        continue;
-      }
-
-      const chunks = await chunkText(
-        parsed.content,
-        parsed.extension,
-        config.chunkSize,
-        config.chunkOverlap,
-        filePath
-      );
-
-      const embeddedChunks: { snippet: string; embedding: Float32Array; entityName?: string | null; chunkType?: string | null; startLine?: number | null; endLine?: number | null }[] = [];
-      for (let i = 0; i < chunks.length; i += config.indexBatchSize ?? 50) {
-        if (signal?.aborted) break;
-        const batch = chunks.slice(i, i + (config.indexBatchSize ?? 50));
-        const embeddings = await embedBatch(batch.map(c => c.text), config.indexThreads);
-        for (let j = 0; j < batch.length; j++) {
-          const chunk = batch[j];
-          const primaryExport = chunk.exports?.[0];
-          embeddedChunks.push({
-            snippet: chunk.text,
-            embedding: embeddings[j],
-            entityName: primaryExport?.name ?? null,
-            chunkType: primaryExport?.type ?? null,
-            startLine: chunk.startLine ?? null,
-            endLine: chunk.endLine ?? null,
-          });
-        }
-        onProgress?.(`Embedded batch ${Math.min(i + (config.indexBatchSize ?? 50), chunks.length)}/${chunks.length} chunks for ${relative(directory, filePath)}`, { transient: true });
-        await Bun.sleep(0);
-      }
-
-      if (signal?.aborted) break;
-
-      // Insert into DB in batches, yielding between each to keep the event loop responsive
-      const DB_BATCH = 500;
-      const fileId = db.upsertFileStart(filePath, hash);
-      for (let i = 0; i < embeddedChunks.length; i += DB_BATCH) {
-        if (signal?.aborted) break;
-        const batch = embeddedChunks.slice(i, i + DB_BATCH);
-        db.insertChunkBatch(fileId, batch, i);
-        onProgress?.(`Writing batch ${Math.min(i + DB_BATCH, embeddedChunks.length)}/${embeddedChunks.length} chunks to DB for ${relative(directory, filePath)}`, { transient: true });
-        await Bun.sleep(0);
-      }
-
-      if (signal?.aborted) break;
-
-      // Store graph metadata (imports/exports)
-      const graphData = aggregateGraphData(chunks);
-      db.upsertFileGraph(fileId, graphData.imports, graphData.exports);
-
-      result.indexed++;
-      onProgress?.(`Indexed: ${relative(directory, filePath)} (${chunks.length} chunks)`);
-      await Bun.sleep(0);
     } catch (err) {
       const msg = `Error indexing ${filePath}: ${err instanceof Error ? err.message : err}`;
       result.errors.push(msg);

@@ -1,20 +1,24 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { existsSync } from "fs";
+import { z } from "zod";
+import { log } from "../utils/log";
 
-export interface RagConfig {
-  include: string[];
-  exclude: string[];
-  chunkSize: number;
-  chunkOverlap: number;
-  hybridWeight: number; // 0-1: 1 = vector only, 0 = BM25 only, 0.7 = default blend
-  searchTopK: number; // default number of results for search
-  indexBatchSize?: number; // chunks to embed per batch before yielding to event loop (default: 50)
-  indexThreads?: number; // ONNX inference threads for embedding (default: cpus/3, min 2)
-  benchmarkTopK: number; // default top-K for benchmark runs
-  benchmarkMinRecall: number; // minimum Recall@K to pass (0-1)
-  benchmarkMinMrr: number; // minimum MRR to pass (0-1)
-}
+const RagConfigSchema = z.object({
+  include: z.array(z.string()).default([]),
+  exclude: z.array(z.string()).default([]),
+  chunkSize: z.number().int().min(64).default(512),
+  chunkOverlap: z.number().int().min(0).default(50),
+  hybridWeight: z.number().min(0).max(1).default(0.7),
+  searchTopK: z.number().int().min(1).default(5),
+  indexBatchSize: z.number().int().min(1).optional(),
+  indexThreads: z.number().int().min(1).optional(),
+  benchmarkTopK: z.number().int().min(1).default(5),
+  benchmarkMinRecall: z.number().min(0).max(1).default(0.8),
+  benchmarkMinMrr: z.number().min(0).max(1).default(0.6),
+});
+
+export type RagConfig = z.infer<typeof RagConfigSchema>;
 
 const DEFAULT_CONFIG: RagConfig = {
   include: [
@@ -61,12 +65,24 @@ export async function loadConfig(projectDir: string): Promise<RagConfig> {
   }
 
   const raw = await readFile(configPath, "utf-8");
-  const userConfig = JSON.parse(raw);
+  let userConfig: unknown;
+  try {
+    userConfig = JSON.parse(raw);
+  } catch {
+    log.warn(`Invalid JSON in ${configPath}, using defaults`, "config");
+    return { ...DEFAULT_CONFIG };
+  }
 
-  return {
-    ...DEFAULT_CONFIG,
-    ...userConfig,
-  };
+  const merged = { ...DEFAULT_CONFIG, ...(userConfig as Record<string, unknown>) };
+  const result = RagConfigSchema.safeParse(merged);
+
+  if (!result.success) {
+    const issues = result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ");
+    log.warn(`Config validation: ${issues}. Using defaults for invalid fields.`, "config");
+    return { ...DEFAULT_CONFIG };
+  }
+
+  return result.data;
 }
 
 export async function writeDefaultConfig(projectDir: string): Promise<string> {

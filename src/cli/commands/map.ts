@@ -1,6 +1,6 @@
 import { resolve } from "path";
 import { RagDB } from "../../db";
-import { generateMermaid } from "../../graph/resolver";
+import { generateProjectMap } from "../../graph/resolver";
 
 export async function mapCommand(args: string[], getFlag: (flag: string) => string | undefined) {
   const dir = resolve(args[1] && !args[1].startsWith("--") ? args[1] : ".");
@@ -9,13 +9,13 @@ export async function mapCommand(args: string[], getFlag: (flag: string) => stri
   const zoom = (getFlag("--zoom") || "file") as "file" | "directory";
   const max = parseInt(getFlag("--max") || "50", 10);
 
-  const mermaid = generateMermaid(db, {
+  const map = generateProjectMap(db, {
     projectDir: dir,
     focus: focus ?? undefined,
     zoom,
     maxNodes: max,
   });
 
-  console.log(mermaid);
+  console.log(map);
   db.close();
 }

@@ -9,10 +9,6 @@ import { resolveImportsForFile } from "../graph/resolver";
 
 const DEBOUNCE_MS = 2000;
 
-function matchesAny(filePath: string, patterns: string[]): boolean {
-  return patterns.some((pat) => new Glob(pat).match(filePath));
-}
-
 export interface Watcher {
   close(): void;
 }
@@ -25,20 +21,24 @@ export function startWatcher(
 ): Watcher {
   const pending = new Map<string, NodeJS.Timeout>();
 
+  // Pre-compile globs once instead of per-event
+  const excludeGlobs = config.exclude.map((pat) => new Glob(pat));
+  const includeGlobs = config.include.map((pat) => new Glob(pat));
+
+  function matchesAny(filePath: string, globs: Glob[]): boolean {
+    return globs.some((g) => g.match(filePath));
+  }
+
   const fsWatcher = watch(directory, { recursive: true }, (_event, filename) => {
     if (!filename) return;
 
     const rel = filename.toString();
 
-    // Skip excluded paths
-    if (matchesAny(rel, config.exclude)) return;
-
-    // Only process files matching include patterns
-    if (!matchesAny(rel, config.include)) return;
+    if (matchesAny(rel, excludeGlobs)) return;
+    if (!matchesAny(rel, includeGlobs)) return;
 
     const absPath = resolve(directory, rel);
 
-    // Debounce: reset timer if same file changes again within window
     const existing = pending.get(absPath);
     if (existing) clearTimeout(existing);
 
@@ -48,7 +48,6 @@ export function startWatcher(
         pending.delete(absPath);
 
         if (!existsSync(absPath)) {
-          // File was deleted
           const removed = db.removeFile(absPath);
           if (removed) {
             onEvent?.(`Removed deleted file: ${rel}`);
@@ -58,11 +57,9 @@ export function startWatcher(
 
         const result = await indexFile(absPath, db, config);
         if (result === "indexed") {
-          // Re-resolve imports for this file and its importers
           const file = db.getFileByPath(absPath);
           if (file) {
             resolveImportsForFile(db, file.id, directory);
-            // Re-resolve files that import this one (exports may have changed)
             for (const importerId of db.getImportersOf(file.id)) {
               resolveImportsForFile(db, importerId, directory);
             }

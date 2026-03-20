@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "fs";
+import { readFileSync, statSync, openSync, readSync, closeSync } from "fs";
 import { Glob } from "bun";
 
 // ── JSONL entry types ──────────────────────────────────────────────
@@ -77,8 +77,15 @@ export function readJSONL(
     return { entries: [], newOffset: fromOffset };
   }
 
-  const buf = readFileSync(filePath);
-  const text = buf.toString("utf-8", fromOffset);
+  const bytesToRead = stat.size - fromOffset;
+  const buf = Buffer.alloc(bytesToRead);
+  const fd = openSync(filePath, "r");
+  try {
+    readSync(fd, buf, 0, bytesToRead, fromOffset);
+  } finally {
+    closeSync(fd);
+  }
+  const text = buf.toString("utf-8");
   const entries: JournalEntry[] = [];
 
   for (const line of text.split("\n")) {

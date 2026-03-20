@@ -1,4 +1,5 @@
 import { chunk as astChunk } from "code-chunk";
+import { log } from "../utils/log";
 
 export interface ChunkImport {
   name: string;
@@ -73,7 +74,7 @@ export async function chunkText(
   filePath?: string
 ): Promise<Chunk[]> {
   const chunks = await _chunkText(text, extension, chunkSize, chunkOverlap, filePath);
-  await assignLineNumbers(chunks, text);
+  assignLineNumbers(chunks, text);
   return chunks;
 }
 
@@ -100,8 +101,8 @@ async function _chunkText(
             .map((e) => ({ name: e.name, type: e.type })),
         }));
       }
-    } catch {
-      // Fall through to heuristic chunking
+    } catch (err) {
+      log.debug(`AST chunking failed for ${filePath || extension}, using heuristic: ${err instanceof Error ? err.message : err}`, "chunker");
     }
   }
 
@@ -172,9 +173,7 @@ async function _chunkText(
  * repeated text still resolves in order. Chunks whose text is not a verbatim
  * substring (e.g. JSON-reformatted chunks) are left without line numbers.
  */
-async function assignLineNumbers(chunks: Chunk[], fullText: string): Promise<void> {
-  // Pre-compute a line offset index so we can binary-search instead of
-  // re-splitting the full text for every chunk (O(n) build, O(log n) per lookup).
+function assignLineNumbers(chunks: Chunk[], fullText: string): void {
   const lineOffsets = [0];
   for (let i = 0; i < fullText.length; i++) {
     if (fullText[i] === "\n") lineOffsets.push(i + 1);
@@ -191,16 +190,13 @@ async function assignLineNumbers(chunks: Chunk[], fullText: string): Promise<voi
   }
 
   let cursor = 0;
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  for (const chunk of chunks) {
     const idx = fullText.indexOf(chunk.text, cursor);
     if (idx >= 0) {
       chunk.startLine = offsetToLine(idx);
       chunk.endLine = offsetToLine(idx + chunk.text.length);
       cursor = idx + chunk.text.length;
     }
-    // Yield every 200 chunks to keep the event loop responsive
-    if (i % 200 === 0 && i > 0) await Promise.resolve();
   }
 }
 

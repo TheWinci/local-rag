@@ -1,12 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { resolve, relative } from "path";
 import { RagDB } from "../db";
-import { generateMermaid } from "../graph/resolver";
+import { generateProjectMap } from "../graph/resolver";
 
 export function registerGraphTools(server: McpServer, getDB: (dir: string) => RagDB) {
   server.tool(
     "project_map",
-    "Generate a Mermaid dependency graph of the project. Shows file relationships, exports, and entry points.",
+    "Generate a structured dependency map of the project. Shows files, their exports, depends_on (imports), and depended_on_by (importers). Entry points are listed separately.",
     {
       directory: z
         .string()
@@ -29,7 +30,7 @@ export function registerGraphTools(server: McpServer, getDB: (dir: string) => Ra
       const projectDir = directory || process.env.RAG_PROJECT_DIR || process.cwd();
       const ragDb = getDB(projectDir);
 
-      const mermaid = generateMermaid(ragDb, {
+      const map = generateProjectMap(ragDb, {
         projectDir,
         focus,
         zoom: zoom ?? "file",
@@ -37,7 +38,7 @@ export function registerGraphTools(server: McpServer, getDB: (dir: string) => Ra
       });
 
       return {
-        content: [{ type: "text" as const, text: mermaid }],
+        content: [{ type: "text" as const, text: map }],
       };
     }
   );
@@ -93,6 +94,74 @@ export function registerGraphTools(server: McpServer, getDB: (dir: string) => Ra
       return {
         content: [{ type: "text" as const, text: lines.join("\n") }],
       };
+    }
+  );
+
+  server.tool(
+    "depends_on",
+    "List all files that a given file imports (its dependencies). Returns resolved file paths only — unresolved or external imports are excluded.",
+    {
+      file: z.string().describe("File path (relative to project) to query"),
+      directory: z
+        .string()
+        .optional()
+        .describe("Project directory. Defaults to RAG_PROJECT_DIR env or cwd"),
+    },
+    async ({ file, directory }) => {
+      const projectDir = directory || process.env.RAG_PROJECT_DIR || process.cwd();
+      const ragDb = getDB(projectDir);
+
+      const absPath = resolve(projectDir, file);
+      const fileRecord = ragDb.getFileByPath(absPath);
+      if (!fileRecord) {
+        return { content: [{ type: "text" as const, text: `File "${file}" not found in index.` }] };
+      }
+
+      const deps = ragDb.getDependsOn(fileRecord.id);
+      if (deps.length === 0) {
+        return { content: [{ type: "text" as const, text: `${file} has no indexed dependencies.` }] };
+      }
+
+      const lines = [`${file} depends on ${deps.length} file${deps.length !== 1 ? "s" : ""}:\n`];
+      for (const dep of deps) {
+        lines.push(`  ${relative(projectDir, dep.path)}  (import: ${dep.source})`);
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
+    }
+  );
+
+  server.tool(
+    "depended_on_by",
+    "List all files that import a given file (its reverse dependencies / importers). Use this to understand the blast radius before modifying a file.",
+    {
+      file: z.string().describe("File path (relative to project) to query"),
+      directory: z
+        .string()
+        .optional()
+        .describe("Project directory. Defaults to RAG_PROJECT_DIR env or cwd"),
+    },
+    async ({ file, directory }) => {
+      const projectDir = directory || process.env.RAG_PROJECT_DIR || process.cwd();
+      const ragDb = getDB(projectDir);
+
+      const absPath = resolve(projectDir, file);
+      const fileRecord = ragDb.getFileByPath(absPath);
+      if (!fileRecord) {
+        return { content: [{ type: "text" as const, text: `File "${file}" not found in index.` }] };
+      }
+
+      const importers = ragDb.getDependedOnBy(fileRecord.id);
+      if (importers.length === 0) {
+        return { content: [{ type: "text" as const, text: `No files import ${file}.` }] };
+      }
+
+      const lines = [`${file} is imported by ${importers.length} file${importers.length !== 1 ? "s" : ""}:\n`];
+      for (const imp of importers) {
+        lines.push(`  ${relative(projectDir, imp.path)}  (import: ${imp.source})`);
+      }
+
+      return { content: [{ type: "text" as const, text: lines.join("\n") }] };
     }
   );
 }
