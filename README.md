@@ -6,8 +6,8 @@ Indexes any files — markdown, code, configs, docs — into a per-project vecto
 
 No API keys. No cloud. No Docker. Just `bunx`.
 
-[![npm](https://img.shields.io/npm/v/local-rag)](https://www.npmjs.com/package/local-rag)
-[![license](https://img.shields.io/npm/l/local-rag)](LICENSE)
+[![npm](https://img.shields.io/npm/v/@winci/local-rag)](https://www.npmjs.com/package/@winci/local-rag)
+[![license](https://img.shields.io/npm/l/@winci/local-rag)](LICENSE)
 
 ## Contents
 
