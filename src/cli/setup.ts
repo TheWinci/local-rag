@@ -147,7 +147,7 @@ export function mcpConfigSnippet(projectDir: string): string {
   return JSON.stringify({
     "local-rag": {
       command: "bunx",
-      args: ["local-rag@latest"],
+      args: ["@winci/local-rag@latest"],
       env: { RAG_PROJECT_DIR: abs },
     },
   }, null, 2);

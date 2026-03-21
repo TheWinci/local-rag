@@ -3,7 +3,7 @@
         "local-rag": {
             "command": "bunx",
             "args": [
-                "local-rag",
+                "@winci/local-rag",
                 "serve"
             ]
         }

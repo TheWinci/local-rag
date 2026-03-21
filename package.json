@@ -1,5 +1,5 @@
 {
-  "name": "local-rag",
+  "name": "@winci/local-rag",
   "version": "0.2.0",
   "description": "Semantic search for your codebase — local-first RAG MCP server with hybrid search, AST-aware chunking, and usage analytics",
   "type": "module",

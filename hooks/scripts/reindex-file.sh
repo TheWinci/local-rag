@@ -13,7 +13,7 @@ fi
 # Only re-index if the file exists (not a deletion)
 if [ -f "$FILE_PATH" ]; then
   # Fire and forget — don't block the agent
-  bunx local-rag index "$(dirname "$FILE_PATH")" --file "$FILE_PATH" 2>/dev/null &
+  bunx @winci/local-rag index "$(dirname "$FILE_PATH")" --file "$FILE_PATH" 2>/dev/null &
 fi
 
 exit 0

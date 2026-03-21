@@ -77,7 +77,7 @@ local-rag/
 | `SessionEnd` | Session closes | Auto-create checkpoint with summary |
 | `SessionStart` | Session opens | Run `git_context` and surface relevant annotations |
 
-**Non-goal:** The core MCP server stays usable standalone via `bunx local-rag serve` for Cursor/Windsurf/VS Code users. The plugin is a wrapper, not a rewrite.
+**Non-goal:** The core MCP server stays usable standalone via `bunx @winci/local-rag serve` for Cursor/Windsurf/VS Code users. The plugin is a wrapper, not a rewrite.
 
 **Estimated scope:** Small-medium. Plugin manifest + skills + hooks + marketplace submission. No changes to core search/indexing.
 

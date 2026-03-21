@@ -76,7 +76,7 @@ No `CLAUDE.md` instructions needed — the plugin's skill tells the agent when a
 See it in action against your own codebase:
 
 ```bash
-bunx local-rag demo
+bunx @winci/local-rag demo
 ```
 
 #### 4. Create a config (optional)
@@ -105,7 +105,7 @@ brew install sqlite
 #### 2. Verify it starts
 
 ```bash
-bunx local-rag serve
+bunx @winci/local-rag serve
 ```
 
 You should see:
@@ -133,7 +133,7 @@ Editors that set cwd to the project automatically (Claude Code, VS Code) work wi
   "mcpServers": {
     "local-rag": {
       "command": "bunx",
-      "args": ["local-rag", "serve"]
+      "args": ["@winci/local-rag", "serve"]
     }
   }
 }
@@ -146,7 +146,7 @@ Editors that set cwd to the project automatically (Claude Code, VS Code) work wi
   "mcpServers": {
     "local-rag": {
       "command": "bunx",
-      "args": ["local-rag", "serve"],
+      "args": ["@winci/local-rag", "serve"],
       "env": {
         "RAG_PROJECT_DIR": "/path/to/your/project"
       }

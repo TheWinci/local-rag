@@ -113,7 +113,7 @@ export async function demoCommand(args: string[]) {
   console.log(`  ${DIM}# Claude Code (plugin)${RESET}`);
   console.log(`  /plugin install local-rag@claude-plugins-official\n`);
   console.log(`  ${DIM}# Any MCP client${RESET}`);
-  console.log(`  bunx local-rag serve\n`);
+  console.log(`  bunx @winci/local-rag serve\n`);
 
   db.close();
 }
