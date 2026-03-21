@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { type SearchResult, type ChunkSearchResult, type SymbolResult, type UsageResult } from "./types";
-import { escapeRegex } from "../search/usages";
+import { escapeRegex, sanitizeFTS } from "../search/usages";
 
 export function vectorSearch(db: Database, queryEmbedding: Float32Array, topK: number = 5): SearchResult[] {
   return db
@@ -53,7 +53,7 @@ export function textSearch(db: Database, query: string, topK: number = 5): Searc
        ORDER BY rank
        LIMIT ?`
     )
-    .all(query, topK)
+    .all(sanitizeFTS(query), topK)
     .map((row) => ({
       path: row.path,
       score: 1 / (1 + Math.abs(row.rank)),
@@ -123,7 +123,7 @@ export function textSearchChunks(db: Database, query: string, topK: number = 8):
        ORDER BY rank
        LIMIT ?`
     )
-    .all(query, topK)
+    .all(sanitizeFTS(query), topK)
     .map((row) => ({
       path: row.path,
       score: 1 / (1 + Math.abs(row.rank)),
@@ -233,7 +233,7 @@ export function findUsages(db: Database, symbolName: string, exact: boolean, top
 
     const line =
       row.start_line != null && matchOffset >= 0
-        ? row.start_line + matchOffset - 1
+        ? row.start_line + matchOffset
         : row.start_line;
 
     results.push({ path: row.path, line, snippet: matchSnippet });

@@ -69,9 +69,12 @@ export function listCheckpoints(
   params.push(limit);
 
   return db
-    .query<any, any[]>(sql)
+    .query<
+      { id: number; session_id: string; turn_index: number; timestamp: string; type: string; title: string; summary: string; files_involved: string; tags: string },
+      (string | number)[]
+    >(sql)
     .all(...params)
-    .map((r: any) => ({
+    .map((r) => ({
       id: r.id,
       sessionId: r.session_id,
       turnIndex: r.turn_index,
@@ -141,8 +144,11 @@ export function searchCheckpoints(
 
 export function getCheckpoint(db: Database, id: number): CheckpointRow | null {
   const r = db
-    .query<any, [number]>(
-      "SELECT * FROM conversation_checkpoints WHERE id = ?"
+    .query<
+      { id: number; session_id: string; turn_index: number; timestamp: string; type: string; title: string; summary: string; files_involved: string; tags: string },
+      [number]
+    >(
+      "SELECT id, session_id, turn_index, timestamp, type, title, summary, files_involved, tags FROM conversation_checkpoints WHERE id = ?"
     )
     .get(id);
   if (!r) return null;

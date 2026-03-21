@@ -104,28 +104,83 @@ export function getSubgraph(db: Database, fileIds: number[], maxHops: number = 2
   nodes: { id: number; path: string; exports: { name: string; type: string }[] }[];
   edges: { fromId: number; fromPath: string; toId: number; toPath: string; source: string }[];
 } {
-  const fullGraph = getGraph(db);
+  // BFS via SQL queries per hop instead of loading the full graph
   const visited = new Set<number>(fileIds);
-  let frontier = new Set<number>(fileIds);
+  let frontier = [...fileIds];
 
-  for (let hop = 0; hop < maxHops; hop++) {
-    const nextFrontier = new Set<number>();
-    for (const edge of fullGraph.edges) {
-      if (frontier.has(edge.fromId) && !visited.has(edge.toId)) {
-        nextFrontier.add(edge.toId);
-        visited.add(edge.toId);
+  for (let hop = 0; hop < maxHops && frontier.length > 0; hop++) {
+    const placeholders = frontier.map(() => "?").join(",");
+    const neighbors = db
+      .query<{ file_id: number; resolved_file_id: number }, number[]>(
+        `SELECT file_id, resolved_file_id FROM file_imports
+         WHERE resolved_file_id IS NOT NULL
+         AND (file_id IN (${placeholders}) OR resolved_file_id IN (${placeholders}))`
+      )
+      .all(...frontier, ...frontier);
+
+    const nextFrontier: number[] = [];
+    for (const row of neighbors) {
+      if (!visited.has(row.file_id)) {
+        visited.add(row.file_id);
+        nextFrontier.push(row.file_id);
       }
-      if (frontier.has(edge.toId) && !visited.has(edge.fromId)) {
-        nextFrontier.add(edge.fromId);
-        visited.add(edge.fromId);
+      if (!visited.has(row.resolved_file_id)) {
+        visited.add(row.resolved_file_id);
+        nextFrontier.push(row.resolved_file_id);
       }
     }
     frontier = nextFrontier;
-    if (frontier.size === 0) break;
   }
 
-  const nodes = fullGraph.nodes.filter((n) => visited.has(n.id));
-  const edges = fullGraph.edges.filter((e) => visited.has(e.fromId) && visited.has(e.toId));
+  // Load only the nodes and edges for visited file IDs
+  const idList = [...visited];
+  const ph = idList.map(() => "?").join(",");
+
+  const files = db
+    .query<{ id: number; path: string }, number[]>(
+      `SELECT id, path FROM files WHERE id IN (${ph})`
+    )
+    .all(...idList);
+
+  const allExports = db
+    .query<{ file_id: number; name: string; type: string }, number[]>(
+      `SELECT file_id, name, type FROM file_exports WHERE file_id IN (${ph})`
+    )
+    .all(...idList);
+
+  const exportsByFile = new Map<number, { name: string; type: string }[]>();
+  for (const exp of allExports) {
+    let arr = exportsByFile.get(exp.file_id);
+    if (!arr) { arr = []; exportsByFile.set(exp.file_id, arr); }
+    arr.push({ name: exp.name, type: exp.type });
+  }
+
+  const nodes = files.map((f) => ({
+    id: f.id,
+    path: f.path,
+    exports: exportsByFile.get(f.id) || [],
+  }));
+
+  const edges = db
+    .query<
+      { file_id: number; from_path: string; resolved_file_id: number; to_path: string; source: string },
+      number[]
+    >(
+      `SELECT fi.file_id, f1.path as from_path, fi.resolved_file_id, f2.path as to_path, fi.source
+       FROM file_imports fi
+       JOIN files f1 ON f1.id = fi.file_id
+       JOIN files f2 ON f2.id = fi.resolved_file_id
+       WHERE fi.resolved_file_id IS NOT NULL
+       AND fi.file_id IN (${ph}) AND fi.resolved_file_id IN (${ph})`
+    )
+    .all(...idList, ...idList)
+    .map((r) => ({
+      fromId: r.file_id,
+      fromPath: r.from_path,
+      toId: r.resolved_file_id,
+      toPath: r.to_path,
+      source: r.source,
+    }));
 
   return { nodes, edges };
 }

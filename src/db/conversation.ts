@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { type ConversationSearchResult } from "./types";
+import { sanitizeFTS } from "../search/usages";
 
 export function upsertSession(
   db: Database,
@@ -85,11 +86,13 @@ export function insertTurn(
       ]
     );
 
+    // If the INSERT was ignored (duplicate), changes() returns 0
+    const inserted = db.query<{ c: number }, []>("SELECT changes() as c").get()!.c;
+    if (inserted === 0) return;
+
     turnId = Number(
       db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id
     );
-
-    if (turnId === 0) return;
 
     for (let i = 0; i < chunks.length; i++) {
       const { snippet, embedding } = chunks[i];
@@ -149,7 +152,7 @@ export function searchConversation(
        JOIN conversation_chunks cc ON cc.id = v.chunk_id
        JOIN conversation_turns ct ON ct.id = cc.turn_id`
     )
-    .all(new Uint8Array(queryEmbedding.buffer), topK * 3);
+    .all(new Uint8Array(queryEmbedding.buffer), sessionId ? topK * 10 : topK * 3);
 
   const results: ConversationSearchResult[] = [];
   const seenTurns = new Set<number>();
@@ -208,7 +211,7 @@ export function textSearchConversation(
        ORDER BY rank
        LIMIT ?`
     )
-    .all(query, topK * 3);
+    .all(sanitizeFTS(query), sessionId ? topK * 10 : topK * 3);
 
   const results: ConversationSearchResult[] = [];
   const seenTurns = new Set<number>();

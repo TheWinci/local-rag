@@ -14,3 +14,14 @@
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+/**
+ * Sanitize a user query for FTS5 MATCH by quoting each token.
+ * FTS5 treats bare +, -, *, AND, OR, NOT, NEAR, ( ) as operators.
+ * Wrapping each token in double quotes forces literal matching.
+ */
+export function sanitizeFTS(query: string): string {
+  const tokens = query.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return '""';
+  return tokens.map(t => `"${t.replace(/"/g, '""')}"`).join(" ");
+}

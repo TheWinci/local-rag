@@ -4,14 +4,18 @@ import { type StoredFile } from "./types";
 
 export function getFileByPath(db: Database, path: string): StoredFile | null {
   return db
-    .query<StoredFile, [string]>("SELECT * FROM files WHERE path = ?")
+    .query<StoredFile, [string]>(
+      "SELECT id, path, hash, indexed_at as indexedAt FROM files WHERE path = ?"
+    )
     .get(path);
 }
 
 export function upsertFileStart(db: Database, path: string, hash: string): number {
   const existing = getFileByPath(db, path);
   if (existing) {
-    const deleteTx = db.transaction(() => {
+    // UPDATE instead of DELETE+INSERT to preserve files.id — this keeps
+    // file_imports.resolved_file_id FKs pointing at this file intact.
+    const tx = db.transaction(() => {
       const oldChunks = db
         .query<{ id: number }, [number]>("SELECT id FROM chunks WHERE file_id = ?")
         .all(existing.id);
@@ -19,9 +23,13 @@ export function upsertFileStart(db: Database, path: string, hash: string): numbe
         db.run("DELETE FROM vec_chunks WHERE chunk_id = ?", [c.id]);
       }
       db.run("DELETE FROM chunks WHERE file_id = ?", [existing.id]);
-      db.run("DELETE FROM files WHERE id = ?", [existing.id]);
+      db.run(
+        "UPDATE files SET hash = ?, indexed_at = ? WHERE id = ?",
+        [hash, new Date().toISOString(), existing.id]
+      );
     });
-    deleteTx();
+    tx();
+    return existing.id;
   }
 
   db.run(
@@ -92,14 +100,23 @@ export function pruneDeleted(db: Database, existingPaths: Set<string>): number {
     .query<{ id: number; path: string }, []>("SELECT id, path FROM files")
     .all();
 
-  let pruned = 0;
-  for (const file of allFiles) {
-    if (!existingPaths.has(file.path)) {
-      removeFile(db, file.path);
-      pruned++;
+  const toRemove = allFiles.filter(f => !existingPaths.has(f.path));
+  if (toRemove.length === 0) return 0;
+
+  const tx = db.transaction(() => {
+    for (const file of toRemove) {
+      const oldChunks = db
+        .query<{ id: number }, [number]>("SELECT id FROM chunks WHERE file_id = ?")
+        .all(file.id);
+      for (const c of oldChunks) {
+        db.run("DELETE FROM vec_chunks WHERE chunk_id = ?", [c.id]);
+      }
+      db.run("DELETE FROM chunks WHERE file_id = ?", [file.id]);
+      db.run("DELETE FROM files WHERE id = ?", [file.id]);
     }
-  }
-  return pruned;
+  });
+  tx();
+  return toRemove.length;
 }
 
 export function getAllFilePaths(db: Database): { id: number; path: string }[] {

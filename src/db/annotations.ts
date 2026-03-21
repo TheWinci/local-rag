@@ -85,9 +85,12 @@ export function getAnnotations(db: Database, path?: string, symbolName?: string 
   sql += " ORDER BY updated_at DESC";
 
   return db
-    .query<any, any[]>(sql)
+    .query<
+      { id: number; path: string; symbol_name: string | null; note: string; author: string | null; created_at: string; updated_at: string },
+      (string | null)[]
+    >(sql)
     .all(...params)
-    .map((r: any) => ({
+    .map((r) => ({
       id: r.id,
       path: r.path,
       symbolName: r.symbol_name,

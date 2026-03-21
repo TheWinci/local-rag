@@ -28,6 +28,15 @@ const AST_SUPPORTED = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java",
 ]);
 
+// Code-like extensions handled by blank-line heuristic splitting
+const HEURISTIC_CODE = new Set([
+  ".c", ".cpp", ".h", ".hpp", ".rb", ".swift",
+  ".sh", ".bash", ".zsh", ".fish",
+  ".tf", ".proto", ".graphql", ".gql",
+  ".mod", ".xml",
+  ".jenkinsfile", ".vagrantfile", ".gemfile", ".rakefile", ".brewfile", ".procfile",
+]);
+
 /**
  * Every extension (real or virtual) that chunkText knows how to handle.
  * Files with extensions outside this set are skipped by the indexer so
@@ -112,16 +121,8 @@ async function _chunkText(
 
   const isMarkdown = [".md", ".mdx", ".markdown"].includes(extension);
   // Code-like files: split on blank-line-separated blocks as a heuristic.
-  // Includes shell, HCL, proto, GraphQL, and various Ruby/Groovy config files.
-  const isCode = [
-    ".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs",
-    ".java", ".c", ".cpp", ".h", ".hpp", ".rb", ".swift",
-    ".sh", ".bash", ".zsh", ".fish",
-    ".tf", ".proto", ".graphql", ".gql",
-    ".mod",
-    ".jenkinsfile", ".vagrantfile", ".gemfile", ".rakefile", ".brewfile", ".procfile",
-    ".xml",
-  ].includes(extension);
+  // Includes AST-supported languages plus shell, HCL, proto, GraphQL, etc.
+  const isCode = AST_SUPPORTED.has(extension) || HEURISTIC_CODE.has(extension);
 
   let sections: string[];
 
@@ -391,7 +392,19 @@ function splitOpenAPIPathsYAML(pathsSection: string): string[] {
   return chunks.length > 0 ? chunks : [pathsSection];
 }
 
+// Above this size, skip JSON.parse to avoid OOM / long GC pauses.
+// 500k-line files (~10-20MB) are fine; this guards against 100MB+ files.
+const JSON_PARSE_LIMIT = 50 * 1024 * 1024;
+
 function splitJSON(text: string): string[] {
+  if (text.length > JSON_PARSE_LIMIT) {
+    log.warn(
+      `JSON file too large for structural parsing (${(text.length / 1024 / 1024).toFixed(1)}MB), using line-based splitting`,
+      "chunker"
+    );
+    return splitParagraphs(text);
+  }
+
   try {
     const obj = JSON.parse(text);
 

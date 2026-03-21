@@ -22,6 +22,39 @@ export interface ChunkResult {
 // Default: 70% vector, 30% BM25
 const DEFAULT_HYBRID_WEIGHT = 0.7;
 
+/**
+ * Merge vector and text search results using hybrid scoring.
+ * Each result must have `score`, `path`, and `chunkIndex` at minimum.
+ * Extra fields from the vector results are preserved on the merged output.
+ */
+function mergeHybridScores<T extends { score: number; path: string; chunkIndex: number }>(
+  vectorResults: T[],
+  textResults: T[],
+  hybridWeight: number
+): T[] {
+  const scoreMap = new Map<string, { item: T; vectorScore: number; textScore: number }>();
+
+  for (const r of vectorResults) {
+    const key = `${r.path}:${r.chunkIndex}`;
+    scoreMap.set(key, { item: r, vectorScore: r.score, textScore: 0 });
+  }
+
+  for (const r of textResults) {
+    const key = `${r.path}:${r.chunkIndex}`;
+    const existing = scoreMap.get(key);
+    if (existing) {
+      existing.textScore = r.score;
+    } else {
+      scoreMap.set(key, { item: r, vectorScore: 0, textScore: r.score });
+    }
+  }
+
+  return Array.from(scoreMap.values()).map((entry) => ({
+    ...entry.item,
+    score: hybridWeight * entry.vectorScore + (1 - hybridWeight) * entry.textScore,
+  }));
+}
+
 export async function search(
   query: string,
   db: RagDB,
@@ -43,29 +76,7 @@ export async function search(
     log.debug(`FTS query failed, falling back to vector-only: ${err instanceof Error ? err.message : err}`, "search");
   }
 
-  // Merge scores: hybridWeight * vector + (1 - hybridWeight) * bm25
-  const scoreMap = new Map<string, { vectorScore: number; textScore: number; snippet: string; path: string }>();
-
-  for (const r of vectorResults) {
-    const key = `${r.path}:${r.chunkIndex}`;
-    scoreMap.set(key, { vectorScore: r.score, textScore: 0, snippet: r.snippet, path: r.path });
-  }
-
-  for (const r of textResults) {
-    const key = `${r.path}:${r.chunkIndex}`;
-    const existing = scoreMap.get(key);
-    if (existing) {
-      existing.textScore = r.score;
-    } else {
-      scoreMap.set(key, { vectorScore: 0, textScore: r.score, snippet: r.snippet, path: r.path });
-    }
-  }
-
-  const merged = Array.from(scoreMap.values()).map((r) => ({
-    path: r.path,
-    score: hybridWeight * r.vectorScore + (1 - hybridWeight) * r.textScore,
-    snippet: r.snippet,
-  }));
+  const merged = mergeHybridScores(vectorResults, textResults, hybridWeight);
 
   // Deduplicate by file path, keeping the best score per file
   const byFile = new Map<string, DedupedResult>();
@@ -131,65 +142,7 @@ export async function searchChunks(
     // FTS query may fail on special characters
   }
 
-  // Merge scores per chunk (keyed by path:chunkIndex)
-  const scoreMap = new Map<string, {
-    vectorScore: number;
-    textScore: number;
-    path: string;
-    content: string;
-    chunkIndex: number;
-    entityName: string | null;
-    chunkType: string | null;
-    startLine: number | null;
-    endLine: number | null;
-  }>();
-
-  for (const r of vectorResults) {
-    const key = `${r.path}:${r.chunkIndex}`;
-    scoreMap.set(key, {
-      vectorScore: r.score,
-      textScore: 0,
-      path: r.path,
-      content: r.content,
-      chunkIndex: r.chunkIndex,
-      entityName: r.entityName,
-      chunkType: r.chunkType,
-      startLine: r.startLine,
-      endLine: r.endLine,
-    });
-  }
-
-  for (const r of textResults) {
-    const key = `${r.path}:${r.chunkIndex}`;
-    const existing = scoreMap.get(key);
-    if (existing) {
-      existing.textScore = r.score;
-    } else {
-      scoreMap.set(key, {
-        vectorScore: 0,
-        textScore: r.score,
-        path: r.path,
-        content: r.content,
-        chunkIndex: r.chunkIndex,
-        entityName: r.entityName,
-        chunkType: r.chunkType,
-        startLine: r.startLine,
-        endLine: r.endLine,
-      });
-    }
-  }
-
-  const results = Array.from(scoreMap.values())
-    .map((r) => ({
-      path: r.path,
-      score: hybridWeight * r.vectorScore + (1 - hybridWeight) * r.textScore,
-      content: r.content,
-      chunkIndex: r.chunkIndex,
-      entityName: r.entityName,
-      chunkType: r.chunkType,
-      startLine: r.startLine,
-      endLine: r.endLine,
-    }))
+  const results = mergeHybridScores(vectorResults, textResults, hybridWeight)
     .filter((r) => r.score >= threshold)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);

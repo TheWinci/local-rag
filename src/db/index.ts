@@ -290,65 +290,177 @@ export class RagDB {
 
   // ── File operations ───────────────────────────────────────────
 
-  getFileByPath(path: string) { return fileOps.getFileByPath(this.db, path); }
-  upsertFileStart(path: string, hash: string) { return fileOps.upsertFileStart(this.db, path, hash); }
-  insertChunkBatch(fileId: number, chunks: EmbeddedChunk[], startIndex: number) { fileOps.insertChunkBatch(this.db, fileId, chunks, startIndex); }
-  upsertFile(path: string, hash: string, chunks: EmbeddedChunk[]) { fileOps.upsertFile(this.db, path, hash, chunks); }
-  removeFile(path: string) { return fileOps.removeFile(this.db, path); }
-  pruneDeleted(existingPaths: Set<string>) { return fileOps.pruneDeleted(this.db, existingPaths); }
-  getAllFilePaths() { return fileOps.getAllFilePaths(this.db); }
-  getStatus() { return fileOps.getStatus(this.db); }
+  getFileByPath(path: string) {
+    return fileOps.getFileByPath(this.db, path);
+  }
+  upsertFileStart(path: string, hash: string) {
+    return fileOps.upsertFileStart(this.db, path, hash);
+  }
+  insertChunkBatch(fileId: number, chunks: EmbeddedChunk[], startIndex: number) {
+    fileOps.insertChunkBatch(this.db, fileId, chunks, startIndex);
+  }
+  upsertFile(path: string, hash: string, chunks: EmbeddedChunk[]) {
+    fileOps.upsertFile(this.db, path, hash, chunks);
+  }
+  removeFile(path: string) {
+    return fileOps.removeFile(this.db, path);
+  }
+  pruneDeleted(existingPaths: Set<string>) {
+    return fileOps.pruneDeleted(this.db, existingPaths);
+  }
+  getAllFilePaths() {
+    return fileOps.getAllFilePaths(this.db);
+  }
+  getStatus() {
+    return fileOps.getStatus(this.db);
+  }
 
   // ── Search operations ─────────────────────────────────────────
 
-  search(queryEmbedding: Float32Array, topK?: number) { return searchOps.vectorSearch(this.db, queryEmbedding, topK); }
-  textSearch(query: string, topK?: number) { return searchOps.textSearch(this.db, query, topK); }
-  searchChunks(queryEmbedding: Float32Array, topK?: number) { return searchOps.vectorSearchChunks(this.db, queryEmbedding, topK); }
-  textSearchChunks(query: string, topK?: number) { return searchOps.textSearchChunks(this.db, query, topK); }
-  searchSymbols(query: string, exact?: boolean, type?: string, topK?: number) { return searchOps.searchSymbols(this.db, query, exact, type, topK); }
-  findUsages(symbolName: string, exact: boolean, top: number) { return searchOps.findUsages(this.db, symbolName, exact, top); }
+  search(queryEmbedding: Float32Array, topK?: number) {
+    return searchOps.vectorSearch(this.db, queryEmbedding, topK);
+  }
+  textSearch(query: string, topK?: number) {
+    return searchOps.textSearch(this.db, query, topK);
+  }
+  searchChunks(queryEmbedding: Float32Array, topK?: number) {
+    return searchOps.vectorSearchChunks(this.db, queryEmbedding, topK);
+  }
+  textSearchChunks(query: string, topK?: number) {
+    return searchOps.textSearchChunks(this.db, query, topK);
+  }
+  searchSymbols(query: string, exact?: boolean, type?: string, topK?: number) {
+    return searchOps.searchSymbols(this.db, query, exact, type, topK);
+  }
+  findUsages(symbolName: string, exact: boolean, top: number) {
+    return searchOps.findUsages(this.db, symbolName, exact, top);
+  }
 
   // ── Graph operations ──────────────────────────────────────────
 
-  upsertFileGraph(fileId: number, imports: { name: string; source: string }[], exports: { name: string; type: string }[]) { graphOps.upsertFileGraph(this.db, fileId, imports, exports); }
-  resolveImport(importId: number, resolvedFileId: number) { graphOps.resolveImport(this.db, importId, resolvedFileId); }
-  getUnresolvedImports() { return graphOps.getUnresolvedImports(this.db); }
-  getGraph() { return graphOps.getGraph(this.db); }
-  getSubgraph(fileIds: number[], maxHops?: number) { return graphOps.getSubgraph(this.db, fileIds, maxHops); }
-  getImportsForFile(fileId: number) { return graphOps.getImportsForFile(this.db, fileId); }
-  getImportersOf(fileId: number) { return graphOps.getImportersOf(this.db, fileId); }
-  getDependsOn(fileId: number) { return graphOps.getDependsOn(this.db, fileId); }
-  getDependedOnBy(fileId: number) { return graphOps.getDependedOnBy(this.db, fileId); }
+  upsertFileGraph(
+    fileId: number,
+    imports: { name: string; source: string }[],
+    exports: { name: string; type: string }[]
+  ) {
+    graphOps.upsertFileGraph(this.db, fileId, imports, exports);
+  }
+  resolveImport(importId: number, resolvedFileId: number) {
+    graphOps.resolveImport(this.db, importId, resolvedFileId);
+  }
+  getUnresolvedImports() {
+    return graphOps.getUnresolvedImports(this.db);
+  }
+  getGraph() {
+    return graphOps.getGraph(this.db);
+  }
+  getSubgraph(fileIds: number[], maxHops?: number) {
+    return graphOps.getSubgraph(this.db, fileIds, maxHops);
+  }
+  getImportsForFile(fileId: number) {
+    return graphOps.getImportsForFile(this.db, fileId);
+  }
+  getImportersOf(fileId: number) {
+    return graphOps.getImportersOf(this.db, fileId);
+  }
+  getDependsOn(fileId: number) {
+    return graphOps.getDependsOn(this.db, fileId);
+  }
+  getDependedOnBy(fileId: number) {
+    return graphOps.getDependedOnBy(this.db, fileId);
+  }
 
   // ── Conversation operations ───────────────────────────────────
 
-  upsertSession(sessionId: string, jsonlPath: string, startedAt: string, mtime: number, readOffset: number) { conversationOps.upsertSession(this.db, sessionId, jsonlPath, startedAt, mtime, readOffset); }
-  getSession(sessionId: string) { return conversationOps.getSession(this.db, sessionId); }
-  updateSessionStats(sessionId: string, turnCount: number, totalTokens: number, readOffset: number) { conversationOps.updateSessionStats(this.db, sessionId, turnCount, totalTokens, readOffset); }
-  insertTurn(sessionId: string, turnIndex: number, timestamp: string, userText: string, assistantText: string, toolsUsed: string[], filesReferenced: string[], tokenCost: number, summary: string, chunks: { snippet: string; embedding: Float32Array }[]) { return conversationOps.insertTurn(this.db, sessionId, turnIndex, timestamp, userText, assistantText, toolsUsed, filesReferenced, tokenCost, summary, chunks); }
-  getTurnCount(sessionId: string) { return conversationOps.getTurnCount(this.db, sessionId); }
-  searchConversation(queryEmbedding: Float32Array, topK?: number, sessionId?: string) { return conversationOps.searchConversation(this.db, queryEmbedding, topK, sessionId); }
-  textSearchConversation(query: string, topK?: number, sessionId?: string) { return conversationOps.textSearchConversation(this.db, query, topK, sessionId); }
+  upsertSession(
+    sessionId: string, jsonlPath: string, startedAt: string,
+    mtime: number, readOffset: number
+  ) {
+    conversationOps.upsertSession(this.db, sessionId, jsonlPath, startedAt, mtime, readOffset);
+  }
+  getSession(sessionId: string) {
+    return conversationOps.getSession(this.db, sessionId);
+  }
+  updateSessionStats(
+    sessionId: string, turnCount: number, totalTokens: number, readOffset: number
+  ) {
+    conversationOps.updateSessionStats(this.db, sessionId, turnCount, totalTokens, readOffset);
+  }
+  insertTurn(
+    sessionId: string, turnIndex: number, timestamp: string,
+    userText: string, assistantText: string, toolsUsed: string[],
+    filesReferenced: string[], tokenCost: number, summary: string,
+    chunks: { snippet: string; embedding: Float32Array }[]
+  ) {
+    return conversationOps.insertTurn(
+      this.db, sessionId, turnIndex, timestamp, userText,
+      assistantText, toolsUsed, filesReferenced, tokenCost, summary, chunks
+    );
+  }
+  getTurnCount(sessionId: string) {
+    return conversationOps.getTurnCount(this.db, sessionId);
+  }
+  searchConversation(queryEmbedding: Float32Array, topK?: number, sessionId?: string) {
+    return conversationOps.searchConversation(this.db, queryEmbedding, topK, sessionId);
+  }
+  textSearchConversation(query: string, topK?: number, sessionId?: string) {
+    return conversationOps.textSearchConversation(this.db, query, topK, sessionId);
+  }
 
   // ── Checkpoint operations ─────────────────────────────────────
 
-  createCheckpoint(sessionId: string, turnIndex: number, timestamp: string, type: string, title: string, summary: string, filesInvolved: string[], tags: string[], embedding: Float32Array) { return checkpointOps.createCheckpoint(this.db, sessionId, turnIndex, timestamp, type, title, summary, filesInvolved, tags, embedding); }
-  listCheckpoints(sessionId?: string, type?: string, limit?: number) { return checkpointOps.listCheckpoints(this.db, sessionId, type, limit); }
-  searchCheckpoints(queryEmbedding: Float32Array, topK?: number, type?: string) { return checkpointOps.searchCheckpoints(this.db, queryEmbedding, topK, type); }
-  getCheckpoint(id: number) { return checkpointOps.getCheckpoint(this.db, id); }
+  createCheckpoint(
+    sessionId: string, turnIndex: number, timestamp: string,
+    type: string, title: string, summary: string,
+    filesInvolved: string[], tags: string[], embedding: Float32Array
+  ) {
+    return checkpointOps.createCheckpoint(
+      this.db, sessionId, turnIndex, timestamp, type, title,
+      summary, filesInvolved, tags, embedding
+    );
+  }
+  listCheckpoints(sessionId?: string, type?: string, limit?: number) {
+    return checkpointOps.listCheckpoints(this.db, sessionId, type, limit);
+  }
+  searchCheckpoints(queryEmbedding: Float32Array, topK?: number, type?: string) {
+    return checkpointOps.searchCheckpoints(this.db, queryEmbedding, topK, type);
+  }
+  getCheckpoint(id: number) {
+    return checkpointOps.getCheckpoint(this.db, id);
+  }
 
   // ── Annotation operations ─────────────────────────────────────
 
-  upsertAnnotation(path: string, note: string, embedding: Float32Array, symbolName?: string | null, author?: string | null) { return annotationOps.upsertAnnotation(this.db, path, note, embedding, symbolName, author); }
-  getAnnotations(path?: string, symbolName?: string | null) { return annotationOps.getAnnotations(this.db, path, symbolName); }
-  searchAnnotations(queryEmbedding: Float32Array, topK?: number) { return annotationOps.searchAnnotations(this.db, queryEmbedding, topK); }
-  deleteAnnotation(id: number) { return annotationOps.deleteAnnotation(this.db, id); }
+  upsertAnnotation(
+    path: string, note: string, embedding: Float32Array,
+    symbolName?: string | null, author?: string | null
+  ) {
+    return annotationOps.upsertAnnotation(this.db, path, note, embedding, symbolName, author);
+  }
+  getAnnotations(path?: string, symbolName?: string | null) {
+    return annotationOps.getAnnotations(this.db, path, symbolName);
+  }
+  searchAnnotations(queryEmbedding: Float32Array, topK?: number) {
+    return annotationOps.searchAnnotations(this.db, queryEmbedding, topK);
+  }
+  deleteAnnotation(id: number) {
+    return annotationOps.deleteAnnotation(this.db, id);
+  }
 
   // ── Analytics operations ──────────────────────────────────────
 
-  logQuery(query: string, resultCount: number, topScore: number | null, topPath: string | null, durationMs: number) { analyticsOps.logQuery(this.db, query, resultCount, topScore, topPath, durationMs); }
-  getAnalytics(days?: number) { return analyticsOps.getAnalytics(this.db, days); }
-  getAnalyticsTrend(days?: number) { return analyticsOps.getAnalyticsTrend(this.db, days); }
+  logQuery(
+    query: string, resultCount: number,
+    topScore: number | null, topPath: string | null, durationMs: number
+  ) {
+    analyticsOps.logQuery(this.db, query, resultCount, topScore, topPath, durationMs);
+  }
+  getAnalytics(days?: number) {
+    return analyticsOps.getAnalytics(this.db, days);
+  }
+  getAnalyticsTrend(days?: number) {
+    return analyticsOps.getAnalyticsTrend(this.db, days);
+  }
 
   // ── Lifecycle ─────────────────────────────────────────────────
 
