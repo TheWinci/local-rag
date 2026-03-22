@@ -2,8 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { resolve, join } from "path";
 import { homedir } from "os";
-import { writeFile, unlink, mkdir } from "fs/promises";
-import { unlinkSync } from "fs";
+import { mkdirSync, writeFileSync, unlinkSync } from "fs";
 import { RagDB } from "../db";
 import { loadConfig } from "../config";
 import { indexDirectory } from "../indexing/indexer";
@@ -67,17 +66,12 @@ export async function startServer() {
     let totalFiles = 0;
     let processedFiles = 0;
 
-    let lastWrite: Promise<void> = Promise.resolve();
-    let cleared = false;
+    const ragDir = join(startupDir, ".rag");
     const writeStatus = (status: string) => {
-      if (cleared) return;
-      lastWrite = mkdir(join(startupDir, ".rag"), { recursive: true })
-        .then(() => { if (!cleared) return writeFile(statusPath, status); })
-        .catch(() => {});
+      try { mkdirSync(ragDir, { recursive: true }); writeFileSync(statusPath, status); } catch {}
     };
     const clearStatus = () => {
-      cleared = true;
-      lastWrite.then(() => unlink(statusPath).catch(() => {}));
+      try { unlinkSync(statusPath); } catch {}
     };
 
     writeStatus("starting");
