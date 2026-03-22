@@ -364,6 +364,7 @@ export async function indexDirectory(
       result.errors.push(msg);
       onProgress?.(msg);
     }
+    onProgress?.(`file:done`);
   }
 
   if (signal?.aborted) return result;

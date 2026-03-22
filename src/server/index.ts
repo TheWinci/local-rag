@@ -76,19 +76,21 @@ export async function startServer() {
 
     writeStatus("starting");
     indexDirectory(startupDir, startupDb, startupConfig, (msg) => {
-      process.stderr.write(`[local-rag] ${msg}\n`);
-
-      // Track progress from indexer messages
-      const foundMatch = msg.match(/^Found (\d+) files to index$/);
-      if (foundMatch) {
-        totalFiles = parseInt(foundMatch[1], 10);
-        writeStatus(`0/${totalFiles} files`);
-      } else if (msg.startsWith("Indexed:") || msg.startsWith("Skipped")) {
+      if (msg === "file:done") {
         processedFiles++;
         if (totalFiles > 0) {
           const pct = Math.round((processedFiles / totalFiles) * 100);
           writeStatus(`${processedFiles}/${totalFiles} files (${pct}%)`);
         }
+        return;
+      }
+
+      process.stderr.write(`[local-rag] ${msg}\n`);
+
+      const foundMatch = msg.match(/^Found (\d+) files to index$/);
+      if (foundMatch) {
+        totalFiles = parseInt(foundMatch[1], 10);
+        writeStatus(`0/${totalFiles} files`);
       }
     }).then((result) => {
       clearStatus();
