@@ -136,6 +136,7 @@ async function processFile(
   const existing = db.getFileByPath(filePath);
 
   if (existing && existing.hash === hash) {
+    onProgress?.(`Skipped (unchanged): ${baseDir ? relative(baseDir, filePath) : filePath}`);
     return "skipped";
   }
 
@@ -150,6 +151,7 @@ async function processFile(
   }
 
   if (!parsed.content.trim()) {
+    onProgress?.(`Skipped (empty): ${relPath}`);
     return "skipped";
   }
 
