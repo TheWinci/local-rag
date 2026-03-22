@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { resolve } from "path";
+import { resolve, join } from "path";
 import { homedir } from "os";
+import { writeFile, unlink, mkdir } from "fs/promises";
 import { RagDB } from "../db";
 import { loadConfig } from "../config";
 import { indexDirectory } from "../indexing/indexer";
@@ -61,9 +62,37 @@ export async function startServer() {
     });
 
     // Index in background — don't block server startup
+    const statusPath = join(startupDir, ".rag", "indexing-status");
+    let totalFiles = 0;
+    let processedFiles = 0;
+
+    const writeStatus = (status: string) => {
+      mkdir(join(startupDir, ".rag"), { recursive: true })
+        .then(() => writeFile(statusPath, status))
+        .catch(() => {});
+    };
+    const clearStatus = () => {
+      unlink(statusPath).catch(() => {});
+    };
+
+    writeStatus("starting");
     indexDirectory(startupDir, startupDb, startupConfig, (msg) => {
       process.stderr.write(`[local-rag] ${msg}\n`);
+
+      // Track progress from indexer messages
+      const foundMatch = msg.match(/^Found (\d+) files to index$/);
+      if (foundMatch) {
+        totalFiles = parseInt(foundMatch[1], 10);
+        writeStatus(`0/${totalFiles} files`);
+      } else if (msg.startsWith("Indexed:") || msg.startsWith("Skipped")) {
+        processedFiles++;
+        if (totalFiles > 0) {
+          const pct = Math.round((processedFiles / totalFiles) * 100);
+          writeStatus(`${processedFiles}/${totalFiles} files (${pct}%)`);
+        }
+      }
     }).then((result) => {
+      clearStatus();
       process.stderr.write(
         `[local-rag] Startup index: ${result.indexed} indexed, ${result.skipped} skipped, ${result.pruned} pruned\n`
       );
@@ -73,6 +102,7 @@ export async function startServer() {
         process.stderr.write(`[local-rag] ${msg}\n`);
       });
     }).catch((err) => {
+      clearStatus();
       log.warn(`Startup indexing failed: ${err instanceof Error ? err.message : err}`, "server");
     });
   }

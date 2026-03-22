@@ -19,6 +19,10 @@
     "code-intelligence"
   ],
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": {
+    "local-rag": {
+      "command": "bunx",
+      "args": ["@winci/local-rag@latest", "serve"]
+    }
+  }
 }
