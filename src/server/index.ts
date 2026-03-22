@@ -3,6 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { resolve, join } from "path";
 import { homedir } from "os";
 import { writeFile, unlink, mkdir } from "fs/promises";
+import { unlinkSync } from "fs";
 import { RagDB } from "../db";
 import { loadConfig } from "../config";
 import { indexDirectory } from "../indexing/indexer";
@@ -147,6 +148,11 @@ export async function startServer() {
     process.stderr.write("[local-rag] Shutting down...\n");
     if (watcher) watcher.close();
     if (convWatcher) convWatcher.close();
+    // Clean up indexing-status file if it exists
+    if (!isHomeDirTrap) {
+      const statusPath = join(startupDir, ".rag", "indexing-status");
+      try { unlinkSync(statusPath); } catch {}
+    }
     for (const d of dbMap.values()) d.close();
     dbMap.clear();
     process.exit(0);
