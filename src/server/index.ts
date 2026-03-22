@@ -67,13 +67,17 @@ export async function startServer() {
     let totalFiles = 0;
     let processedFiles = 0;
 
+    let lastWrite: Promise<void> = Promise.resolve();
+    let cleared = false;
     const writeStatus = (status: string) => {
-      mkdir(join(startupDir, ".rag"), { recursive: true })
-        .then(() => writeFile(statusPath, status))
+      if (cleared) return;
+      lastWrite = mkdir(join(startupDir, ".rag"), { recursive: true })
+        .then(() => { if (!cleared) return writeFile(statusPath, status); })
         .catch(() => {});
     };
     const clearStatus = () => {
-      unlink(statusPath).catch(() => {});
+      cleared = true;
+      lastWrite.then(() => unlink(statusPath).catch(() => {}));
     };
 
     writeStatus("starting");
