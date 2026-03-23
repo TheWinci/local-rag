@@ -248,7 +248,7 @@ local-rag read <query>       # Chunk-level retrieval (like read_relevant)
 local-rag status [dir]       # Show index stats
 local-rag remove <path>      # Remove a file from the index
 local-rag analytics [dir]    # Usage analytics with trend comparison
-local-rag map [dir]          # Dependency graph (Mermaid output)
+local-rag map [dir]          # Dependency graph (text format)
 local-rag benchmark [dir]    # Run search quality benchmark
 local-rag eval [dir]         # A/B eval harness
 local-rag conversation       # Conversation subcommands (search, sessions, index)
@@ -292,7 +292,7 @@ Trend (current 30d vs prior 30d):
 
 ## Project map
 
-The `project_map` MCP tool generates a Mermaid dependency graph from import/export relationships extracted during indexing. This gives AI agents (and humans) a bird's-eye view of how files relate to each other.
+The `project_map` MCP tool generates a dependency graph from import/export relationships extracted during indexing. This gives AI agents (and humans) a bird's-eye view of how files relate to each other.
 
 Here's the dependency graph for this project's source domains:
 
@@ -364,6 +364,7 @@ Create `.rag/config.json` in your project. The defaults index all [supported fil
 | `hybridWeight` | `0.7` | Blend ratio: 1.0 = vector only, 0.0 = BM25 only |
 | `enableReranking` | `true` | Cross-encoder reranking for higher precision (adds ~80MB model on first query) |
 | `searchTopK` | `5` | Default number of search results |
+| `incrementalChunks` | `false` | When enabled, only re-embeds chunks whose content hash changed. Falls back to full re-index if >50% of chunks differ |
 
 ## Supported file types
 
@@ -371,7 +372,7 @@ Files are detected by extension or by basename (for files with no extension or a
 
 ### AST-aware (tree-sitter)
 
-These use `code-chunk` to extract real function/class/interface/enum boundaries. Import and export symbols are also captured and stored for the project dependency graph.
+These use [bun-chunk](https://github.com/TheWinci/bun-chunk) to extract real function/class/interface/enum boundaries via tree-sitter grammars. Import and export symbols are also captured with full metadata (`isDefault`, `isNamespace`, `isReExport`) and stored for the project dependency graph. When `chunkFile()` is available (file on disk), chunks also include `parentName` (e.g. `ClassName.methodName`) and content hashes for incremental re-indexing.
 
 | Extensions | Notes |
 |---|---|
@@ -380,6 +381,14 @@ These use `code-chunk` to extract real function/class/interface/enum boundaries.
 | `.go` | Go |
 | `.rs` | Rust |
 | `.java` | Java |
+| `.c` `.h` | C |
+| `.cpp` `.cc` `.cxx` `.hpp` `.hh` `.hxx` | C++ |
+| `.cs` | C# |
+| `.rb` | Ruby |
+| `.php` | PHP |
+| `.scala` `.sc` | Scala |
+| `.html` `.htm` | HTML |
+| `.css` `.scss` `.less` | CSS / SCSS / LESS |
 
 ### Structured data & config
 
@@ -401,12 +410,6 @@ Detected by basename — exact match or prefix match (e.g. `Dockerfile.dev` and 
 | `Jenkinsfile` `Jenkinsfile.*` | Split on blank-line blocks (Groovy DSL). |
 | `Vagrantfile` `Gemfile` `Rakefile` `Brewfile` | Split on blank-line blocks (Ruby DSL). |
 | `Procfile` | Split on blank-line blocks. |
-
-### Styles
-
-| Extensions | Chunking strategy |
-|---|---|
-| `.css` `.scss` `.less` | Split on top-level brace blocks — each rule, `@media`, `@keyframes`, etc. is its own chunk. |
 
 ### Shell & scripting
 
@@ -483,13 +486,13 @@ flowchart TD
 
 3. **Embed** — Each chunk is embedded into a 384-dimensional vector using all-MiniLM-L6-v2 (runs in-process via Transformers.js + ONNX, no API calls). Vectors are stored in sqlite-vec for fast similarity search.
 
-4. **Extract imports/exports** — During AST chunking, import specifiers and exported symbols are captured. After all files are indexed, relative imports are resolved to actual files in the index (with extension probing for `.ts`/`.tsx`/`.js`/`.jsx`). This builds the dependency graph.
+4. **Extract imports/exports** — During AST chunking, import specifiers and exported symbols are captured with full metadata (default/namespace/re-export flags). After all files are indexed, imports are resolved using a two-pass approach: first bun-chunk's filesystem resolver (handles tsconfig `paths`, Python relative imports, Rust `crate::` paths), then DB-based extension probing as fallback. This builds the dependency graph.
 
 5. **Hybrid search + reranking** — Queries run both vector similarity (semantic) and BM25 (keyword) searches in parallel, then blend results using `hybridWeight` (default 0.7 = 70% semantic, 30% keyword). When `enableReranking` is true (default), the top candidates are re-scored by a cross-encoder model (ms-marco-MiniLM-L-6-v2) for higher precision — the cross-encoder sees the full (query, passage) pair and can catch nuances that embedding similarity misses. `search` deduplicates by file and returns the best-scoring file with a 400-char snippet. `read_relevant` skips deduplication and returns top-N individual chunks with full content, entity names (function/class names from AST parsing), and **exact line ranges** (`path:start-end`) — so you can navigate directly to an edit location without reading the full file.
 
 5a. **Usage search** — `find_usages` locates every call site of a symbol by querying the FTS index, excluding the file that defines it, and resolving per-line matches using the stored chunk line ranges. Useful before any rename or API change to understand the blast radius.
 
-6. **Project map** — Generates a Mermaid dependency graph from the stored import/export relationships. Supports file-level and directory-level zoom, and focused subgraphs (BFS from a specific file). Entry points are auto-detected and highlighted.
+6. **Project map** — Generates a structured text dependency graph from the stored import/export relationships. Supports file-level and directory-level zoom (auto-switches to directory view when >50 nodes), and focused subgraphs (BFS from a specific file). Entry points (files with no importers) are auto-detected and highlighted.
 
 7. **Watcher** — The MCP server watches for file changes with a 2-second debounce. Changed files are re-indexed and their import relationships re-resolved. Deleted files are pruned automatically.
 
@@ -534,6 +537,7 @@ README.md
 | Layer | Choice |
 |---|---|
 | Runtime | Bun (built-in SQLite, fast TS) |
+| AST chunking | [bun-chunk](https://github.com/TheWinci/bun-chunk) — tree-sitter grammars for 14 languages, with `chunkFile()` for context + metadata |
 | Embeddings | Transformers.js + ONNX (in-process, no daemon) |
 | Embedding model | all-MiniLM-L6-v2 (~23MB, 384 dimensions) |
 | Reranker | ms-marco-MiniLM-L-6-v2 cross-encoder (~80MB, downloaded on first query) |
