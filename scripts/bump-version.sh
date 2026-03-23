@@ -38,3 +38,10 @@ sed -i '' "s/\"version\": \"$PLUGIN_CURRENT\"/\"version\": \"$NEW\"/" "$PLUGIN"
 echo "$CURRENT -> $NEW"
 echo "  $PKG"
 echo "  $PLUGIN"
+
+# Commit and tag
+git -C "$ROOT" add "$PKG" "$PLUGIN"
+git -C "$ROOT" commit -m "$NEW"
+git -C "$ROOT" tag -a "v$NEW" -m "v$NEW"
+
+echo "Committed and tagged v$NEW"
