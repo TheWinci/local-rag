@@ -35,7 +35,10 @@
     "server": "bun run src/main.ts serve",
     "cli": "bun run src/main.ts",
     "test": "bun test tests/ 2>&1; EXIT=$?; if [ $EXIT -eq 133 ]; then printf '\\n[note] Exit code 133 suppressed — known Bun crash on macOS Silicon during process cleanup (github.com/oven-sh/bun/issues/19917). All tests passed.\\n'; exit 0; else exit $EXIT; fi",
-    "bench": "bun test benchmarks/"
+    "bench": "bun test benchmarks/",
+    "bump": "./scripts/bump-version.sh",
+    "bump:minor": "./scripts/bump-version.sh minor",
+    "bump:major": "./scripts/bump-version.sh major"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.4.0",

@@ -13,8 +13,8 @@ No API keys. No cloud. No Docker. Just `bunx`.
 
 - [Why](#why)
 - [Quick start](#quick-start)
-  - [Claude Code plugin](#claude-code-plugin-recommended)
   - [MCP server (any editor)](#mcp-server-any-editor)
+  - [Claude Code plugin](#claude-code-plugin)
 - [MCP tools](#mcp-tools)
 - [CLI](#cli)
 - [Analytics](#analytics)
@@ -35,68 +35,13 @@ No API keys. No cloud. No Docker. Just `bunx`.
 
 ## Quick start
 
-### Claude Code plugin (recommended)
-
-The fastest way to get started with Claude Code. The plugin bundles the MCP server, auto-trigger skills, and lifecycle hooks — no manual config needed.
-
-#### 1. Install SQLite (macOS)
-
-Apple's bundled SQLite doesn't support extensions. Install the Homebrew version first:
-
-```bash
-brew install sqlite
-```
-
-#### 2. Install the plugin
-
-From the official marketplace (once approved):
-
-```bash
-/plugin install local-rag@claude-plugins-official
-```
-
-Or install directly from GitHub:
-
-```bash
-# Clone and point Claude Code at it
-git clone https://github.com/TheWinci/local-rag.git
-claude --plugin-dir ./local-rag
-```
-
-That's it. The plugin:
-- Starts the MCP server automatically
-- Indexes your project on startup and watches for changes
-- Auto-reindexes files when you edit them (via `PostToolUse` hook)
-- Makes the agent use RAG tools proactively (via built-in skill)
-
-No `CLAUDE.md` instructions needed — the plugin's skill tells the agent when and how to use each tool.
-
-#### 3. Try the demo
-
-See it in action against your own codebase:
-
-```bash
-bunx @winci/local-rag demo
-```
-
-#### 4. Create a config (optional)
-
-Create `.rag/config.json` in your project root to customize which files are indexed:
-
-```json
-{
-  "include": ["**/*.md", "**/*.ts", "**/*.js", "**/*.py", "**/*.go", "**/*.rs", "**/*.css", "**/*.scss", "**/*.less"],
-  "exclude": ["node_modules/**", ".git/**", "dist/**", ".rag/**"]
-}
-```
-
-See the [Configuration](#configuration) section for all options. Add `.rag/` to your `.gitignore`.
-
 ### MCP server (any editor)
 
 Works with any [MCP](https://modelcontextprotocol.io/)-compatible client — Claude Code, Cursor, Windsurf, VS Code Copilot, and more.
 
 #### 1. Install SQLite (macOS)
+
+Apple's bundled SQLite doesn't support extensions. Install the Homebrew version first:
 
 ```bash
 brew install sqlite
@@ -219,9 +164,50 @@ This project has a local RAG index (local-rag). Use these MCP tools:
   point — returns the most semantically appropriate file and anchor.
 ```
 
+#### 5. Try the demo
+
+See it in action against your own codebase:
+
+```bash
+bunx @winci/local-rag demo
+```
+
+#### 6. Create a config (optional)
+
+Create `.rag/config.json` in your project root to customize which files are indexed:
+
+```json
+{
+  "include": ["**/*.md", "**/*.ts", "**/*.js", "**/*.py", "**/*.go", "**/*.rs", "**/*.css", "**/*.scss", "**/*.less"],
+  "exclude": ["node_modules/**", ".git/**", "dist/**", ".rag/**"]
+}
+```
+
+See the [Configuration](#configuration) section for all options. Add `.rag/` to your `.gitignore`.
+
+### Claude Code plugin
+
+If you use Claude Code, you can install local-rag as a plugin to get auto-trigger skills and a `PostToolUse` hook that re-indexes files whenever you edit them.
+
+```bash
+# Clone and point Claude Code at it
+git clone https://github.com/TheWinci/local-rag.git
+claude --plugin-dir ./local-rag
+```
+
+The plugin:
+- Starts the MCP server automatically
+- Indexes your project on startup and watches for changes
+- Auto-reindexes files when you edit them (via `PostToolUse` hook)
+- Makes the agent use RAG tools proactively (via built-in skill)
+
+No `CLAUDE.md` instructions needed — the plugin's skill tells the agent when and how to use each tool.
+
 ### Auto-indexing
 
-The MCP server automatically indexes your project on startup and watches for file changes during the session. It also tails the active conversation transcript in real time and indexes past sessions on startup. You don't need to manually run `index` — just connect and search.
+The MCP server automatically indexes your project on startup and watches for file changes during the session. You don't need to manually run `index` — just connect and search.
+
+Conversation history indexing (via `search_conversation`) tails Claude Code's JSONL transcripts in real time and indexes past sessions on startup. This feature is specific to Claude Code — other editors don't expose conversation transcripts in a format local-rag can read.
 
 > **Plugin users**: Files are also re-indexed automatically whenever you edit them, via the `PostToolUse` hook.
 
@@ -237,7 +223,7 @@ These tools are available to any MCP client (Claude Code, etc.) once the server 
 | `index_status` | Show file count, chunk count, last indexed time |
 | `remove_file` | Remove a specific file from the index |
 | `search_analytics` | Usage analytics — query counts, zero-result queries, low-relevance queries, top terms |
-| `project_map` | Generate a Mermaid dependency graph of the project — file-level or directory-level, with optional focus |
+| `project_map` | Generate a dependency graph of the project — file-level or directory-level, with optional focus |
 | `search_conversation` | Search conversation history — finds past decisions, discussions, and tool outputs across sessions |
 | `create_checkpoint` | Mark an important moment — decisions, milestones, blockers, direction changes, or handoffs |
 | `list_checkpoints` | List checkpoints, most recent first. Filter by session or type |
@@ -553,7 +539,7 @@ README.md
 | Reranker | ms-marco-MiniLM-L-6-v2 cross-encoder (~80MB, downloaded on first query) |
 | Vector store | sqlite-vec (single `.db` file) |
 | MCP | @modelcontextprotocol/sdk (stdio transport) |
-| Plugin | Claude Code plugin with skills + lifecycle hooks |
+| Plugin | Claude Code plugin with skills + `PostToolUse` hook (via `--plugin-dir`) |
 
 ## Per-project storage
 

@@ -110,10 +110,10 @@ export async function demoCommand(args: string[]) {
   console.log(`  ${GREEN}write_relevant${RESET}       Find best insertion point for new code`);
 
   console.log(`\n${BOLD}Done.${RESET} Add to your editor with:\n`);
-  console.log(`  ${DIM}# Claude Code (plugin)${RESET}`);
-  console.log(`  /plugin install local-rag@claude-plugins-official\n`);
-  console.log(`  ${DIM}# Any MCP client${RESET}`);
+  console.log(`  ${DIM}# Start the MCP server${RESET}`);
   console.log(`  bunx @winci/local-rag serve\n`);
+  console.log(`  ${DIM}# Then add to your editor's MCP config (Claude Code, Cursor, Windsurf, VS Code):${RESET}`);
+  console.log(`  { "mcpServers": { "local-rag": { "command": "bunx", "args": ["@winci/local-rag", "serve"] } } }\n`);
 
   db.close();
 }
