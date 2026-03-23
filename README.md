@@ -323,7 +323,7 @@ Create `.rag/config.json` in your project. The defaults index all [supported fil
 | `enableReranking` | `true` | Cross-encoder reranking for higher precision (adds ~80MB model on first query) |
 | `embeddingModel` | _(default)_ | Override the embedding model (HuggingFace model ID). Must have ONNX weights. Requires re-index |
 | `embeddingDim` | _(default)_ | Embedding dimension to match the model (e.g. 384 for bge-small-en-v1.5) |
-| `searchTopK` | `5` | Default number of search results |
+| `searchTopK` | `7` | Default number of search results |
 | `incrementalChunks` | `false` | When enabled, only re-embeds chunks whose content hash changed. Falls back to full re-index if >50% of chunks differ |
 
 ## Supported file types
@@ -496,12 +496,12 @@ README.md
 
 Benchmarked on two codebases with known expected files per query. Full details in [BENCHMARKS.md](BENCHMARKS.md).
 
-| Codebase | Files | Queries | Recall@5 | MRR | Zero-miss |
+| Codebase | Files | Queries | Recall@7 | MRR | Zero-miss |
 |---|---|---|---|---|---|
-| local-rag (this project) | 97 | 20 | 92.5% | 0.600 | 5.0% |
-| Express.js | 161 | 15 | 86.7% | 0.678 | 13.3% |
+| local-rag (this project) | 97 | 20 | 97.5% | 0.588 | 0.0% |
+| Express.js | 161 | 15 | 93.3% | 0.678 | 6.7% |
 
-Using all-MiniLM-L6-v2 with hybrid search, pipeline improvements, and conditional cross-encoder reranking. Users who want maximum recall can switch to bge-small-en-v1.5 via [config](#configuration) for up to 97.5% recall@5 on TypeScript codebases. Full details and model comparison in [BENCHMARKS.md](BENCHMARKS.md).
+Default top-K was raised from 5 to 7 based on benchmark data showing misses landing just outside the top-5 window — this recovered +5pp recall on local-rag and +6.7pp on Express with only 2 extra results per query. Using all-MiniLM-L6-v2 with hybrid search, pipeline improvements, and conditional cross-encoder reranking. Full details and model comparison in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Stack
 

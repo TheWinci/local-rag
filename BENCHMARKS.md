@@ -6,21 +6,33 @@ Search quality benchmarks measured on two codebases. Last updated 2026-03-23.
 
 ## Results
 
-All results use hybrid search (70% vector / 30% BM25) with pipeline improvements enabled.
+All results use hybrid search (70% vector / 30% BM25) with pipeline improvements enabled. Default top-K is 7.
 
 ### local-rag (97 files, 20 queries)
 
-| Config | Recall@5 | MRR | Zero-miss |
+| Config | Recall@7 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **92.5%** | **0.600** | **5.0%** |
+| **all-MiniLM-L6-v2 (default)** | **97.5%** | **0.588** | **0.0%** |
 | bge-small-en-v1.5 (opt-in) | 97.5% | 0.540 | 0.0% |
 
 ### Express.js (161 files, 15 queries)
 
-| Config | Recall@5 | MRR | Zero-miss |
+| Config | Recall@7 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **86.7%** | **0.678** | **13.3%** |
+| **all-MiniLM-L6-v2 (default)** | **93.3%** | **0.678** | **6.7%** |
 | bge-small-en-v1.5 (opt-in) | 80.0% | 0.541 | 20.0% |
+
+### Why top-7?
+
+Benchmark data showed misses landing at ranks 6-7 — just outside the previous top-5 window.
+
+| K | local-rag Recall | local-rag Zero-miss | Express Recall | Express Zero-miss |
+|---|---|---|---|---|
+| 5 | 92.5% | 5.0% | 86.7% | 13.3% |
+| **7** | **97.5%** | **0.0%** | **93.3%** | **6.7%** |
+| 10 | 97.5% | 0.0% | 93.3% | 6.7% |
+
+Top-7 captures the gains with minimal extra context. Top-10 adds nothing beyond top-7.
 
 ### Model tradeoff
 
@@ -32,7 +44,7 @@ All results use hybrid search (70% vector / 30% BM25) with pipeline improvements
 
 ## Decision
 
-**Default: all-MiniLM-L6-v2.** Faster indexing, smaller download, higher MRR, and better recall on Express. bge-small edges ahead on TypeScript codebases where the dependency graph boost has more data.
+**Default: all-MiniLM-L6-v2 at top-7.** Faster indexing, smaller download, higher MRR, and better recall on Express. At top-7, all-MiniLM matches bge-small on local-rag (97.5%) and beats it on Express (93.3% vs 80.0%).
 
 Users who want maximum recall on TypeScript projects can opt in:
 
@@ -53,7 +65,7 @@ The search pipeline applies five post-retrieval optimizations (no re-indexing ne
 4. **Doc expansion** — doc files in top-K expand the result set instead of displacing code
 5. **Conditional reranking** — skip the cross-encoder for code-heavy queries (≥50% identifiers)
 
-Impact of pipeline on all-MiniLM-L6-v2:
+Impact of pipeline on all-MiniLM-L6-v2 (at top-5, before top-K change):
 
 | Codebase | Without pipeline | With pipeline | Delta |
 |---|---|---|---|
@@ -64,11 +76,11 @@ Impact of pipeline on all-MiniLM-L6-v2:
 
 ```bash
 bunx @winci/local-rag index .
-bunx @winci/local-rag benchmark benchmarks/local-rag-queries.json --dir . --top 5
+bunx @winci/local-rag benchmark benchmarks/local-rag-queries.json --dir . --top 7
 
 # Compare models
 bunx @winci/local-rag benchmark-models benchmarks/local-rag-queries.json \
-  --models "Xenova/all-MiniLM-L6-v2,Xenova/bge-small-en-v1.5" --dir . --top 5
+  --models "Xenova/all-MiniLM-L6-v2,Xenova/bge-small-en-v1.5" --dir . --top 7
 ```
 
 Query files: [local-rag](benchmarks/local-rag-queries.json) (20 queries), [Express.js](benchmarks/express-queries.json) (15 queries).
