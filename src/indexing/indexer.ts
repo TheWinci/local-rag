@@ -68,10 +68,12 @@ const MAX_COLLECT_FILES = 100_000;
 async function collectFiles(
   directory: string,
   config: RagConfig,
-  onWarning?: (msg: string) => void
+  onWarning?: (msg: string) => void,
+  onProgress?: (msg: string) => void
 ): Promise<string[]> {
   const excludeGlobs = config.exclude.map((pat) => new Glob(pat));
   const seen = new Set<string>();
+  let lastReport = 0;
 
   for (const pattern of config.include) {
     const glob = new Glob(pattern);
@@ -80,6 +82,11 @@ async function collectFiles(
         const rel = relative(directory, file);
         if (!matchesAny(rel, excludeGlobs) && !seen.has(file)) {
           seen.add(file);
+          const now = Date.now();
+          if (now - lastReport >= 500) {
+            onProgress?.(`scanning files… ${seen.size} found`);
+            lastReport = now;
+          }
           if (seen.size > MAX_COLLECT_FILES) {
             throw new Error(
               `Aborting: found more than ${MAX_COLLECT_FILES.toLocaleString()} files in "${directory}". ` +
@@ -381,9 +388,16 @@ export async function indexDirectory(
     throw new Error(dirCheck.reason!);
   }
 
-  const matchedFiles = await collectFiles(directory, config, onProgress);
+  const matchedFiles = await collectFiles(directory, config, onProgress, onProgress);
 
   onProgress?.(`Found ${matchedFiles.length} files to index`);
+
+  // Eagerly load the embedding model so status reflects model-loading before
+  // individual file progress begins.
+  if (matchedFiles.length > 0) {
+    const { getEmbedder } = await import("../embeddings/embed");
+    await getEmbedder(config.indexThreads, onProgress);
+  }
 
   for (const filePath of matchedFiles) {
     if (signal?.aborted) break;

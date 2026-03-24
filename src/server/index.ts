@@ -88,6 +88,12 @@ export async function startServer() {
 
       process.stderr.write(`[local-rag] ${msg}\n`);
 
+      // File scanning progress
+      if (msg.startsWith("scanning files")) {
+        writeStatus(msg);
+        return;
+      }
+
       // Model loading messages from embedder
       if (msg.startsWith("Loading embedding model") || msg.startsWith("Retrying model load")) {
         writeStatus(msg);
