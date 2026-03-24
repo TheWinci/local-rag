@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { resolve, join } from "path";
-import { homedir } from "os";
+import { checkIndexDir } from "../utils/dir-guard";
 import { mkdirSync, writeFileSync } from "fs";
 import { RagDB } from "../db";
 import { loadConfig } from "../config";
@@ -41,12 +41,12 @@ export async function startServer() {
   // Auto-index on startup + start file watcher
   const startupDir = process.env.RAG_PROJECT_DIR || process.cwd();
 
-  const isHomeDirTrap = resolve(startupDir) === homedir();
+  const dirCheck = checkIndexDir(startupDir);
+  const isHomeDirTrap = !dirCheck.safe;
   if (isHomeDirTrap) {
     process.stderr.write(
-      `[local-rag] WARNING: project directory is your home folder (${startupDir}).\n` +
-      `[local-rag] Skipping auto-index and file watcher. Set RAG_PROJECT_DIR to your project path.\n` +
-      `[local-rag] Example: "env": { "RAG_PROJECT_DIR": "/path/to/your/project" }\n`
+      `[local-rag] WARNING: ${dirCheck.reason}\n` +
+      `[local-rag] Skipping auto-index and file watcher.\n`
     );
   }
   const startupDb = getDB(startupDir);

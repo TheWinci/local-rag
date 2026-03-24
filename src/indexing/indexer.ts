@@ -1,6 +1,6 @@
 import { relative } from "path";
 import { createHash } from "crypto";
-import { readFile } from "fs/promises";
+import { readFile, stat } from "fs/promises";
 import { Glob } from "bun";
 import { parseFile } from "./parse";
 import { embedBatch } from "../embeddings/embed";
@@ -9,6 +9,7 @@ import { RagDB } from "../db";
 import { type RagConfig } from "../config";
 import { resolveImports } from "../graph/resolver";
 import { log } from "../utils/log";
+import { checkIndexDir } from "../utils/dir-guard";
 import { type EmbeddedChunk } from "../types";
 
 function aggregateGraphData(chunks: { imports?: ChunkImport[]; exports?: ChunkExport[] }[]): {
@@ -57,21 +58,36 @@ function matchesAny(filePath: string, globs: Glob[]): boolean {
   return globs.some((g) => g.match(filePath));
 }
 
+/**
+ * Hard cap on files to collect. Prevents OOM when the project directory
+ * accidentally resolves to ~ or / and glob starts walking the entire FS.
+ * 100 000 source files is already a very large monorepo — anything beyond
+ * that almost certainly means the directory is wrong.
+ */
+const MAX_COLLECT_FILES = 100_000;
+
 async function collectFiles(
   directory: string,
   config: RagConfig,
   onWarning?: (msg: string) => void
 ): Promise<string[]> {
   const excludeGlobs = config.exclude.map((pat) => new Glob(pat));
+  const seen = new Set<string>();
 
-  async function scanPattern(pattern: string): Promise<string[]> {
-    const files: string[] = [];
+  for (const pattern of config.include) {
     const glob = new Glob(pattern);
     try {
       for await (const file of glob.scan({ cwd: directory, absolute: true })) {
         const rel = relative(directory, file);
-        if (!matchesAny(rel, excludeGlobs)) {
-          files.push(file);
+        if (!matchesAny(rel, excludeGlobs) && !seen.has(file)) {
+          seen.add(file);
+          if (seen.size > MAX_COLLECT_FILES) {
+            throw new Error(
+              `Aborting: found more than ${MAX_COLLECT_FILES.toLocaleString()} files in "${directory}". ` +
+              `This usually means RAG_PROJECT_DIR is not set and the server defaulted to your home folder or another broad directory. ` +
+              `Set RAG_PROJECT_DIR to your actual project path in your MCP server config.`
+            );
+          }
         }
       }
     } catch (err: any) {
@@ -81,11 +97,9 @@ async function collectFiles(
         throw err;
       }
     }
-    return files;
   }
 
-  const results = await Promise.all(config.include.map(scanPattern));
-  return [...new Set(results.flat())];
+  return [...seen];
 }
 
 interface ProcessFileOptions {
@@ -131,6 +145,18 @@ async function processFile(
 ): Promise<"indexed" | "skipped"> {
   const { config, baseDir, onProgress, signal } = opts;
   const batchSize = config.indexBatchSize ?? 50;
+
+  // Skip files larger than 50 MB — reading them fully into memory twice
+  // (hash + parse) can easily OOM the process. Matches the JSON_PARSE_LIMIT
+  // in chunker.ts for consistency.
+  const MAX_FILE_SIZE = 50 * 1024 * 1024;
+  const fileStat = await stat(filePath);
+  if (fileStat.size > MAX_FILE_SIZE) {
+    const relPath = baseDir ? relative(baseDir, filePath) : filePath;
+    const sizeMB = (fileStat.size / 1024 / 1024).toFixed(1);
+    onProgress?.(`Skipped (too large, ${sizeMB} MB): ${relPath}`);
+    return "skipped";
+  }
 
   const hash = await fileHash(filePath);
   const existing = db.getFileByPath(filePath);
@@ -338,6 +364,12 @@ export async function indexDirectory(
   const result: IndexResult = { indexed: 0, skipped: 0, pruned: 0, errors: [] };
 
   if (signal?.aborted) return result;
+
+  // Guard against indexing system-level directories (home, root, etc.)
+  const dirCheck = checkIndexDir(directory);
+  if (!dirCheck.safe) {
+    throw new Error(dirCheck.reason!);
+  }
 
   const matchedFiles = await collectFiles(directory, config, onProgress);
 
