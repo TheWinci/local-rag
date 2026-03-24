@@ -55,6 +55,17 @@ export async function startServer() {
   let watcher: Watcher | null = null;
   let convWatcher: Watcher | null = null;
 
+  // Define statusPath early so writeStatus can use it immediately
+  const ragDir = join(startupDir, ".rag");
+  const statusPath = !isHomeDirTrap ? join(ragDir, "indexing-status") : null;
+  const writeStatus = (status: string) => {
+    if (!statusPath) return;
+    try { mkdirSync(ragDir, { recursive: true }); writeFileSync(statusPath, status); } catch {}
+  };
+
+  // Write status immediately so the file exists as soon as the MCP starts
+  writeStatus(`starting\nversion: ${version}\nstarted: ${new Date().toISOString()}`);
+
   if (!isHomeDirTrap) {
     // Ensure .rag/ is gitignored
     ensureGitignore(startupDir).catch((err) => {
@@ -65,11 +76,6 @@ export async function startServer() {
     let totalFiles = 0;
     let processedFiles = 0;
 
-    const ragDir = join(startupDir, ".rag");
-    const writeStatus = (status: string) => {
-      try { mkdirSync(ragDir, { recursive: true }); writeFileSync(statusPath!, status); } catch {}
-    };
-    writeStatus("starting");
     indexDirectory(startupDir, startupDb, startupConfig, (msg) => {
       if (msg === "file:done") {
         processedFiles++;
@@ -81,6 +87,13 @@ export async function startServer() {
       }
 
       process.stderr.write(`[local-rag] ${msg}\n`);
+
+      // Model loading messages from embedder
+      if (msg.startsWith("Loading embedding model") || msg.startsWith("Retrying model load")) {
+        writeStatus(msg);
+        return;
+      }
+      if (msg === "Model loaded") return;
 
       const foundMatch = msg.match(/^Found (\d+) files to index$/);
       if (foundMatch) {
@@ -147,7 +160,6 @@ export async function startServer() {
   }
 
   // Write to indexing-status on abnormal exit so the file doesn't stay stuck on "starting"
-  const statusPath = !isHomeDirTrap ? join(startupDir, ".rag", "indexing-status") : null;
   function writeExitStatus(reason: string) {
     if (!statusPath) return;
     try {

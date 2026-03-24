@@ -34,7 +34,10 @@ export function configureEmbedder(modelId: string, dim: number): void {
   }
 }
 
-export async function getEmbedder(threads?: number): Promise<FeatureExtractionPipeline> {
+export async function getEmbedder(
+  threads?: number,
+  onProgress?: (msg: string) => void,
+): Promise<FeatureExtractionPipeline> {
   if (!extractor) {
     const numThreads = threads ?? defaultThreadCount();
     const pipelineOptions = {
@@ -44,6 +47,7 @@ export async function getEmbedder(threads?: number): Promise<FeatureExtractionPi
         interOpNumThreads: numThreads,
       },
     };
+    onProgress?.(`Loading embedding model ${currentModelId}...`);
     try {
       extractor = await pipeline("feature-extraction", currentModelId, pipelineOptions);
     } catch (err) {
@@ -52,24 +56,34 @@ export async function getEmbedder(threads?: number): Promise<FeatureExtractionPi
       if (msg.includes("Protobuf parsing failed") || msg.includes("Load model")) {
         const modelDir = join(CACHE_DIR, ...currentModelId.split("/"));
         rmSync(modelDir, { recursive: true, force: true });
+        onProgress?.(`Retrying model load (cache was corrupted)...`);
         extractor = await pipeline("feature-extraction", currentModelId, pipelineOptions);
       } else {
         throw err;
       }
     }
+    onProgress?.(`Model loaded`);
   }
   return extractor;
 }
 
-export async function embed(text: string, threads?: number): Promise<Float32Array> {
-  const model = await getEmbedder(threads);
+export async function embed(
+  text: string,
+  threads?: number,
+  onProgress?: (msg: string) => void,
+): Promise<Float32Array> {
+  const model = await getEmbedder(threads, onProgress);
   const output = await model(text, { pooling: "mean", normalize: true });
   return new Float32Array(output.data as Float64Array);
 }
 
-export async function embedBatch(texts: string[], threads?: number): Promise<Float32Array[]> {
+export async function embedBatch(
+  texts: string[],
+  threads?: number,
+  onProgress?: (msg: string) => void,
+): Promise<Float32Array[]> {
   if (texts.length === 0) return [];
-  const model = await getEmbedder(threads);
+  const model = await getEmbedder(threads, onProgress);
   const output = await model(texts, { pooling: "mean", normalize: true });
   const flat = new Float32Array(output.data as Float64Array);
   const result: Float32Array[] = [];

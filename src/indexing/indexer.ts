@@ -214,7 +214,11 @@ async function processFile(
     if (signal?.aborted) break;
 
     const batch = chunks.slice(i, i + batchSize);
-    const embeddings = await embedBatch(batch.map(c => c.text), config.indexThreads);
+    const embeddings = await embedBatch(
+      batch.map(c => c.text),
+      config.indexThreads,
+      onProgress ? (msg: string) => onProgress(msg) : undefined,
+    );
 
     for (let j = 0; j < batch.length; j++) {
       pendingDbChunks.push(buildEmbeddedChunk(batch[j], embeddings[j]));
@@ -309,7 +313,11 @@ async function processFileIncremental(
     if (signal?.aborted) return null;
 
     const batch = newChunks.slice(i, i + batchSize);
-    const embeddings = await embedBatch(batch.map(c => c.text), config.indexThreads);
+    const embeddings = await embedBatch(
+      batch.map(c => c.text),
+      config.indexThreads,
+      onProgress ? (msg: string) => onProgress(msg) : undefined,
+    );
 
     const embeddedBatch: EmbeddedChunk[] = batch.map((chunk, j) =>
       buildEmbeddedChunk(chunk, embeddings[j])
