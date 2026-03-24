@@ -42,6 +42,13 @@ export async function startServer() {
   // Register all MCP tools
   registerAllTools(server, getDB);
 
+  // Connect transport IMMEDIATELY so the MCP client's `initialize` handshake
+  // is answered before any slow startup work (config I/O, session discovery,
+  // indexing).  Without this, the client may time out, close the pipes, and
+  // the server's subsequent stderr writes hit EPIPE.
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
   // Auto-index on startup + start file watcher
   const startupDir = process.env.RAG_PROJECT_DIR || process.cwd();
 
@@ -85,10 +92,8 @@ export async function startServer() {
       log.warn(`Could not write indexing-status: ${statusErr instanceof Error ? statusErr.message : statusErr}`, "server");
     }
 
-    // Keep the MCP server alive so tool calls return a clear error message
-    // instead of the client seeing "server process exited"
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
+    // Server is already connected — just return and let tool calls
+    // hit the initError guard in getDB()
     return;
   }
 
@@ -260,7 +265,4 @@ export async function startServer() {
     cleanup(`unhandled rejection: ${err instanceof Error ? err.message : err}`);
   });
 
-  // Start server
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
 }
