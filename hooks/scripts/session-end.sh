@@ -2,6 +2,10 @@
 # SessionEnd hook: auto-create a checkpoint summarizing the session.
 # Uses git diff to capture what changed during the session.
 
+if ! command -v bun &>/dev/null; then
+  exit 0  # Bun not installed — skip silently
+fi
+
 DIR="${RAG_PROJECT_DIR:-.}"
 
 # Collect changed files since session start (uncommitted changes)

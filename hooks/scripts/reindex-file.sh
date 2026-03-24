@@ -3,6 +3,10 @@
 # Claude Code passes hook event JSON on stdin.
 # The tool_input contains the file_path of the modified file.
 
+if ! command -v bun &>/dev/null; then
+  exit 0  # Bun not installed — skip silently, server startup will surface the error
+fi
+
 INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | grep -o '"file_path"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"file_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
 

@@ -19,8 +19,12 @@ const { version } = await import("../../package.json");
 // Lazy-init DB per project directory — keep all open to avoid
 // closing a DB that background tasks (auto-index, watcher) still use.
 const dbMap = new Map<string, RagDB>();
+let initError: string | null = null;
 
 function getDB(projectDir: string): RagDB {
+  if (initError) {
+    throw new Error(initError);
+  }
   const resolved = resolve(projectDir);
   let db = dbMap.get(resolved);
   if (db) return db;
@@ -49,7 +53,45 @@ export async function startServer() {
       `[local-rag] Skipping auto-index and file watcher.\n`
     );
   }
-  const startupDb = getDB(startupDir);
+
+  // Preflight: verify DB can be created (catches missing Homebrew SQLite on macOS)
+  let startupDb: ReturnType<typeof getDB>;
+  try {
+    startupDb = getDB(startupDir);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const fix = msg.includes("brew install sqlite")
+      ? `Fix: run "brew install sqlite" and restart your editor.`
+      : msg.includes("EROFS") || msg.includes("EACCES")
+        ? `Fix: set RAG_DB_DIR to a writable directory in your MCP config.`
+        : `Check the local-rag README for setup instructions.`;
+
+    initError = `${msg}\n\n${fix}`;
+    process.stderr.write(`[local-rag] FATAL: ${msg}\n[local-rag] ${fix}\n`);
+
+    // Write the error to indexing-status so it's visible to the user/IDE
+    const ragDir = join(startupDir, ".rag");
+    try {
+      mkdirSync(ragDir, { recursive: true });
+      writeFileSync(join(ragDir, "indexing-status"), [
+        `error`,
+        `version: ${version}`,
+        `failed: ${new Date().toISOString()}`,
+        msg,
+        ``,
+        fix,
+      ].join("\n"));
+    } catch (statusErr) {
+      log.warn(`Could not write indexing-status: ${statusErr instanceof Error ? statusErr.message : statusErr}`, "server");
+    }
+
+    // Keep the MCP server alive so tool calls return a clear error message
+    // instead of the client seeing "server process exited"
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    return;
+  }
+
   const startupConfig = await loadConfig(startupDir);
 
   let watcher: Watcher | null = null;
@@ -60,7 +102,12 @@ export async function startServer() {
   const statusPath = !isHomeDirTrap ? join(ragDir, "indexing-status") : null;
   const writeStatus = (status: string) => {
     if (!statusPath) return;
-    try { mkdirSync(ragDir, { recursive: true }); writeFileSync(statusPath, status); } catch {}
+    try {
+      mkdirSync(ragDir, { recursive: true });
+      writeFileSync(statusPath, status);
+    } catch (statusErr) {
+      log.warn(`Could not write indexing-status: ${statusErr instanceof Error ? statusErr.message : statusErr}`, "server");
+    }
   };
 
   // Write status immediately so the file exists as soon as the MCP starts
@@ -76,7 +123,7 @@ export async function startServer() {
     let totalFiles = 0;
     let processedFiles = 0;
 
-    indexDirectory(startupDir, startupDb, startupConfig, (msg) => {
+    indexDirectory(startupDir, startupDb, startupConfig, (msg, progressOpts) => {
       if (msg === "file:done") {
         processedFiles++;
         if (totalFiles > 0) {
@@ -105,6 +152,13 @@ export async function startServer() {
       if (foundMatch) {
         totalFiles = parseInt(foundMatch[1], 10);
         writeStatus(`0/${totalFiles} files`);
+        return;
+      }
+
+      // Show per-file activity so status doesn't stay stuck on "0/N"
+      if (totalFiles > 0 && !progressOpts?.transient) {
+        const pct = Math.round((processedFiles / totalFiles) * 100);
+        writeStatus(`${processedFiles}/${totalFiles} files (${pct}%)\n${msg}`);
       }
     }).then((result) => {
       const dbStatus = startupDb.getStatus();
@@ -178,7 +232,9 @@ export async function startServer() {
         `stopped: ${new Date().toISOString()}`,
         `reason: ${reason}`,
       ].join("\n"));
-    } catch {}
+    } catch (statusErr) {
+      log.warn(`Could not write exit status: ${statusErr instanceof Error ? statusErr.message : statusErr}`, "server");
+    }
   }
 
   // Graceful shutdown
