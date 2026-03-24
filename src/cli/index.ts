@@ -58,7 +58,7 @@ Usage:
 
 Options:
   dir       Project directory (default: current directory)
-  --top N   Number of results (default: 7)
+  --top N   Number of results (default: 10)
   --patterns  Comma-separated glob patterns to include`);
 }
 

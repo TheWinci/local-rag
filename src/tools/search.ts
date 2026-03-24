@@ -20,7 +20,7 @@ export function registerSearchTools(server: McpServer, getDB: GetDB) {
       top: z
         .number()
         .optional()
-        .describe("Number of results to return (default: from config or 7)"),
+        .describe("Number of results to return (default: from config or 10)"),
     },
     async ({ query, directory, top }) => {
       const { db: ragDb, config } = await resolveProject(directory, getDB);

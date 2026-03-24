@@ -323,7 +323,7 @@ Create `.rag/config.json` in your project. The defaults index all [supported fil
 | `enableReranking` | `true` | Cross-encoder reranking for higher precision (adds ~80MB model on first query) |
 | `embeddingModel` | _(default)_ | Override the embedding model (HuggingFace model ID). Must have ONNX weights. Requires re-index |
 | `embeddingDim` | _(default)_ | Embedding dimension to match the model (e.g. 384 for bge-small-en-v1.5) |
-| `searchTopK` | `7` | Default number of search results |
+| `searchTopK` | `10` | Default number of search results |
 | `incrementalChunks` | `false` | When enabled, only re-embeds chunks whose content hash changed. Falls back to full re-index if >50% of chunks differ |
 
 ## Supported file types
@@ -496,13 +496,13 @@ README.md
 
 Benchmarked on three codebases with known expected files per query. Full details in [BENCHMARKS.md](BENCHMARKS.md).
 
-| Codebase | Files | Queries | Recall@7 | MRR | Zero-miss |
+| Codebase | Files | Queries | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|---|---|
 | local-rag (this project) | 97 | 20 | 97.5% | 0.588 | 0.0% |
 | Express.js | 161 | 15 | 93.3% | 0.678 | 6.7% |
-| Excalidraw | 676 | 20 | 85.0% | 0.512 | 15.0% |
+| Excalidraw | 676 | 20 | 90.0% | 0.509 | 10.0% |
 
-Recall degrades gracefully with codebase size — 85% on a 676-file monorepo with no tuning. Using all-MiniLM-L6-v2 with hybrid search, pipeline improvements, and conditional cross-encoder reranking. JSON and CSS/SCSS files are excluded from default indexing — they add noise without helping code search. Full details and model comparison in [BENCHMARKS.md](BENCHMARKS.md).
+Recall degrades gracefully with codebase size — 90% on a 676-file monorepo with no tuning. Default top-K is 10, chosen by benchmarking the recall curve at K=5 through K=20 across all three codebases (see [BENCHMARKS.md](BENCHMARKS.md#why-top-10)). JSON and CSS/SCSS files are excluded from default indexing — they add noise without helping code search.
 
 ## Stack
 

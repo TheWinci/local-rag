@@ -1,77 +1,126 @@
 # Benchmarks
 
-Search quality benchmarks measured on three codebases. Last updated 2026-03-23.
+Search quality benchmarks measured on three codebases. Last updated 2026-03-24.
 
 **Metrics:** Recall@K (fraction of expected files in top-K), MRR (1/rank of first hit), Zero-miss (queries with no expected file in results).
 
 ## Results
 
-All results use hybrid search (70% vector / 30% BM25) with pipeline improvements enabled. Default top-K is 7.
+All results use hybrid search (70% vector / 30% BM25) with pipeline improvements enabled. Default top-K is 10.
 
 ### local-rag (97 files, 20 queries)
 
-| Config | Recall@7 | MRR | Zero-miss |
+| Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
 | **all-MiniLM-L6-v2 (default)** | **97.5%** | **0.588** | **0.0%** |
+| all-MiniLM-L12-v2 | 100.0% | 0.645 | 0.0% |
 | bge-small-en-v1.5 (opt-in) | 97.5% | 0.540 | 0.0% |
 
 ### Express.js (161 files, 15 queries)
 
-| Config | Recall@7 | MRR | Zero-miss |
+| Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
 | **all-MiniLM-L6-v2 (default)** | **93.3%** | **0.678** | **6.7%** |
+| all-MiniLM-L12-v2 | 93.3% | 0.636 | 6.7% |
 | bge-small-en-v1.5 (opt-in) | 80.0% | 0.541 | 20.0% |
 
-### Excalidraw (761 files, 20 queries)
+### Excalidraw (676 files, 20 queries)
 
-| Config | Recall@7 | MRR | Zero-miss |
+| Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **85.0%** | **0.512** | **15.0%** |
+| **all-MiniLM-L6-v2 (default)** | **90.0%** | **0.509** | **10.0%** |
+| all-MiniLM-L12-v2 | 80.0% | 0.404 | 20.0% |
 
-Excalidraw is the stress test — a large monorepo with 676 indexed files across `packages/`, `excalidraw-app/`, `dev-docs/`, and `examples/`. Remaining misses are files whose exports are imported in many other files (consumers outrank the source definition).
+Excalidraw is the stress test — a large monorepo with 676 indexed files across `packages/`, `excalidraw-app/`, `dev-docs/`, and `examples/`. Remaining misses are files whose exports are imported everywhere — consumers outrank the source definition at any K.
 
 ### Scaling behavior
 
-| Codebase | Files | Recall@7 | MRR | Zero-miss |
+| Codebase | Files | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|---|
 | local-rag | 97 | 97.5% | 0.588 | 0.0% |
 | Express.js | 161 | 93.3% | 0.678 | 6.7% |
-| Excalidraw | 676 | 85.0% | 0.512 | 15.0% |
+| Excalidraw | 676 | 90.0% | 0.509 | 10.0% |
 
 Recall degrades gracefully with codebase size. The dependency graph boost and symbol expansion help most on smaller codebases where the graph is complete.
 
-### Why top-7?
+### Why top-10?
 
-Benchmark data showed misses landing at ranks 6-7 — just outside the previous top-5 window.
+We benchmarked at K=5, 7, 10, 15, 20 across all three codebases to find the diminishing-returns point.
 
-| K | local-rag Recall | Express Recall | Excalidraw Recall |
+| K | local-rag | Express | Excalidraw | Extra tokens vs K=10 |
+|---|---|---|---|---|
+| 5 | 92.5% | 86.7% | 80.0% | −750 |
+| 7 | 97.5% | 93.3% | 85.0% | −450 |
+| **10** | **97.5%** | **93.3%** | **90.0%** | **baseline** |
+| 15 | 100.0% | 93.3% | 90.0% | +750 |
+| 20 | 100.0% | 100.0% | 90.0% | +1500 |
+
+K=10 is the plateau for large codebases — Excalidraw gains nothing past 10. Each result adds ~150 tokens (~$0.0005 at Sonnet pricing), so the cost of 10 results vs 5 is negligible for agents that routinely consume thousands of tokens per tool call.
+
+### Model comparison (5 candidates, 384d)
+
+Comprehensive comparison of all 384-dimension ONNX embedding models viable for local code search. All models tested on identical queries with hybrid search (70/30 vector/BM25) and pipeline improvements.
+
+#### Recall@10
+
+| Model | local-rag (97) | Express (161) | Excalidraw (676) |
 |---|---|---|---|
-| 5 | 92.5% | 86.7% | — |
-| **7** | **97.5%** | **93.3%** | **85.0%** |
-| 10 | 97.5% | 93.3% | 90.0% |
+| **all-MiniLM-L6-v2 (default)** | **100.0%** | **93.3%** | **90.0%** |
+| snowflake-arctic-embed-xs | 100.0% | 73.3% | 75.0% |
+| mxbai-embed-xsmall-v1 | 100.0% | 93.3% | 90.0% |
+| **gte-small** | **100.0%** | **100.0%** | **95.0%** |
+| snowflake-arctic-embed-s | 87.5% | 60.0% | 85.0% |
+| all-MiniLM-L12-v2 | 100.0% | 93.3% | 80.0% |
 
-Top-7 captures the gains on small/medium codebases with minimal extra context. On large codebases, top-10 adds +5pp.
+#### MRR
 
-### Model tradeoff
+| Model | local-rag | Express | Excalidraw |
+|---|---|---|---|
+| **all-MiniLM-L6-v2 (default)** | **0.572** | **0.672** | **0.491** |
+| snowflake-arctic-embed-xs | 0.581 | 0.561 | 0.387 |
+| mxbai-embed-xsmall-v1 | 0.603 | 0.669 | 0.464 |
+| **gte-small** | **0.656** | **0.731** | **0.507** |
+| snowflake-arctic-embed-s | 0.654 | 0.327 | 0.394 |
+| all-MiniLM-L12-v2 | 0.645 | 0.636 | 0.404 |
 
-| | all-MiniLM-L6-v2 | bge-small-en-v1.5 |
-|---|---|---|
-| Download size | 23MB | 127MB |
-| Index time (97 files) | ~40s | ~80s |
-| Best for | General use, JS codebases | TypeScript with deep import graphs |
+#### Index time
+
+| Model | 97 files | 161 files | 676 files | Relative |
+|---|---|---|---|---|
+| all-MiniLM-L6-v2 | 59s | 57s | 593s | 1.0× |
+| snowflake-arctic-embed-xs | 69s | 59s | 458s | ~0.9× |
+| mxbai-embed-xsmall-v1 | 69s | 69s | 448s | ~0.9× |
+| gte-small | 132s | 118s | 866s | ~1.6× |
+| snowflake-arctic-embed-s | 120s | 115s | 869s | ~1.6× |
+| all-MiniLM-L12-v2 | ~86s | — | ~863s | ~1.5× |
+
+#### Summary
+
+| Model | Download | Strengths | Weaknesses |
+|---|---|---|---|
+| **all-MiniLM-L6-v2** | 23MB | Fast indexing, good recall at all scales | Lower MRR than gte-small |
+| snowflake-arctic-embed-xs | 45MB | Fast indexing | Poor recall at scale (75% on Excalidraw) |
+| mxbai-embed-xsmall-v1 | 60MB | Matches L6 recall, fast | Slightly lower MRR |
+| gte-small | 67MB | Best recall and MRR across all codebases | 1.6× slower indexing |
+| snowflake-arctic-embed-s | 110MB | — | Worst recall (60% on Express), slow |
+| all-MiniLM-L12-v2 | 33MB | Good MRR on small codebases | −10pp recall on Excalidraw, 1.5× slower |
+
+**gte-small** is the clear runner-up: +5pp recall and +0.016 MRR on Excalidraw, +6.7pp recall and +0.059 MRR on Express, with identical 100% recall on small codebases. The cost is 1.6× slower indexing and a 67MB download (vs 23MB). The two Snowflake models and MiniLM-L12 all degrade at scale and are not recommended.
 
 ## Decision
 
-**Default: all-MiniLM-L6-v2 at top-7.** Faster indexing, smaller download, higher MRR, and better recall on Express. JSON and CSS/SCSS/LESS files removed from default indexing — locale bundles, config, and stylesheets add noise without helping code search.
+**Default: all-MiniLM-L6-v2 at top-10.** Fastest indexing, smallest download, and strong recall at all scales. JSON and CSS/SCSS/LESS files removed from default indexing — locale bundles, config, and stylesheets add noise without helping code search.
 
-Users who want maximum recall on TypeScript projects can opt in:
+Users who want maximum recall can opt into gte-small:
 
 ```json
 {
-  "embeddingModel": "Xenova/bge-small-en-v1.5",
+  "embeddingModel": "Xenova/gte-small",
   "embeddingDim": 384
 }
 ```
+
+This trades ~60% slower indexing for +5pp recall on large codebases (676 files: 95% vs 90%) and consistently higher MRR.
 
 ## Pipeline improvements
 
@@ -83,26 +132,29 @@ The search pipeline applies five post-retrieval optimizations (no re-indexing ne
 4. **Doc expansion** — doc files in top-K expand the result set instead of displacing code
 5. **Conditional reranking** — skip the cross-encoder for code-heavy queries (≥50% identifiers)
 
-Impact of pipeline on all-MiniLM-L6-v2 (at top-5, before top-K change):
+Impact of pipeline on all-MiniLM-L6-v2:
 
 | Codebase | Without pipeline | With pipeline | Delta |
 |---|---|---|---|
-| local-rag | 77.5% | 92.5% | +15.0pp |
-| Express.js | 73.3% | 86.7% | +13.4pp |
+| local-rag | 95.0% | 97.5% | +2.5pp |
+| Express.js | 93.3% | 93.3% | +0.0pp |
+| Excalidraw | 90.0% | 90.0% | +0.0pp |
+
+At top-10, returning more results naturally catches files the pipeline would have boosted into position. The pipeline's impact was larger at top-5 (+15pp on local-rag, +13pp on Express) where ranking precision matters more.
 
 ## Reproducing
 
 ```bash
 bunx @winci/local-rag index .
-bunx @winci/local-rag benchmark benchmarks/local-rag-queries.json --dir . --top 7
+bunx @winci/local-rag benchmark benchmarks/local-rag-queries.json --dir . --top 10
 
 # Excalidraw (clone first: git clone --depth 1 https://github.com/excalidraw/excalidraw.git /tmp/excalidraw-bench)
 bunx @winci/local-rag index /tmp/excalidraw-bench
-bunx @winci/local-rag benchmark benchmarks/excalidraw-queries.json --dir /tmp/excalidraw-bench --top 7
+bunx @winci/local-rag benchmark benchmarks/excalidraw-queries.json --dir /tmp/excalidraw-bench --top 10
 
 # Compare models
 bunx @winci/local-rag benchmark-models benchmarks/local-rag-queries.json \
-  --models "Xenova/all-MiniLM-L6-v2,Xenova/bge-small-en-v1.5" --dir . --top 7
+  --models "Xenova/all-MiniLM-L6-v2,Xenova/bge-small-en-v1.5" --dir . --top 10
 ```
 
 Query files: [local-rag](benchmarks/local-rag-queries.json) (20 queries), [Express.js](benchmarks/express-queries.json) (15 queries), [Excalidraw](benchmarks/excalidraw-queries.json) (20 queries).
