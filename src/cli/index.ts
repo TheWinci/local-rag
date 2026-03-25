@@ -23,7 +23,8 @@ function usage() {
 
 Usage:
   local-rag serve                      Start MCP server (stdio)
-  local-rag init [dir]                 Create default .rag/config.json
+  local-rag init [dir] [--ide IDEs]    Create default .rag/config.json
+              IDEs: claude,cursor,windsurf,copilot,all
   local-rag index [dir] [--patterns ...] Index files in directory
   local-rag search <query> [--top N]   Search indexed files
   local-rag read <query> [--top N]     Read relevant chunks (full content)

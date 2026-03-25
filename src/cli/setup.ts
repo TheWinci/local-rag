@@ -109,28 +109,54 @@ async function injectMdc(filePath: string, dir: string): Promise<string | null> 
   return `Created ${filePath}`;
 }
 
-export async function ensureAgentInstructions(projectDir: string): Promise<string[]> {
+export type IDE = "claude" | "cursor" | "windsurf" | "copilot";
+export const ALL_IDES: IDE[] = ["claude", "cursor", "windsurf", "copilot"];
+
+export function parseIdeFlag(value: string): IDE[] {
+  if (value === "all") return [...ALL_IDES];
+  const ides = value.split(",").map(s => s.trim().toLowerCase());
+  const valid = new Set<string>(ALL_IDES);
+  for (const ide of ides) {
+    if (!valid.has(ide)) {
+      console.error(`Unknown IDE: ${ide}. Valid options: ${ALL_IDES.join(", ")}, all`);
+      process.exit(1);
+    }
+  }
+  return ides as IDE[];
+}
+
+export async function ensureAgentInstructions(projectDir: string, ides?: IDE[]): Promise<string[]> {
   const actions: string[] = [];
+  const forced = new Set(ides);
 
   // Claude Code — always create/update
   const claudeAction = await injectMarkdown(join(projectDir, "CLAUDE.md"), MARKDOWN_BLOCK);
   if (claudeAction) actions.push(claudeAction);
 
-  // Cursor — only if .cursor/ exists
+  // Cursor — if .cursor/ exists or explicitly requested
+  if (forced.has("cursor") && !existsSync(join(projectDir, ".cursor"))) {
+    await mkdir(join(projectDir, ".cursor"), { recursive: true });
+  }
   const cursorAction = await injectMdc(
     join(projectDir, ".cursor", "rules", "local-rag.mdc"),
     join(projectDir, ".cursor")
   );
   if (cursorAction) actions.push(cursorAction);
 
-  // Windsurf — only if .windsurf/ exists
+  // Windsurf — if .windsurf/ exists or explicitly requested
+  if (forced.has("windsurf") && !existsSync(join(projectDir, ".windsurf"))) {
+    await mkdir(join(projectDir, ".windsurf"), { recursive: true });
+  }
   const windsurfAction = await injectMdc(
     join(projectDir, ".windsurf", "rules", "local-rag.mdc"),
     join(projectDir, ".windsurf")
   );
   if (windsurfAction) actions.push(windsurfAction);
 
-  // GitHub Copilot — only if .github/ exists
+  // GitHub Copilot — if .github/ exists or explicitly requested
+  if (forced.has("copilot") && !existsSync(join(projectDir, ".github"))) {
+    await mkdir(join(projectDir, ".github"), { recursive: true });
+  }
   if (existsSync(join(projectDir, ".github"))) {
     const copilotAction = await injectMarkdown(
       join(projectDir, ".github", "copilot-instructions.md"),
@@ -161,66 +187,42 @@ function mcpServerEntry(projectDir: string) {
   };
 }
 
-export async function ensureMcpJson(projectDir: string): Promise<string[]> {
+async function upsertMcpJson(mcpPath: string, entry: object): Promise<string | null> {
+  if (existsSync(mcpPath)) {
+    const raw = JSON.parse(await readFile(mcpPath, "utf-8"));
+    if (raw.mcpServers?.["local-rag"]) return null;
+    raw.mcpServers = raw.mcpServers || {};
+    raw.mcpServers["local-rag"] = entry;
+    await writeFile(mcpPath, JSON.stringify(raw, null, 2) + "\n");
+    return `Added local-rag to ${mcpPath}`;
+  }
+  await mkdir(join(mcpPath, ".."), { recursive: true });
+  await writeFile(
+    mcpPath,
+    JSON.stringify({ mcpServers: { "local-rag": entry } }, null, 2) + "\n"
+  );
+  return `Created ${mcpPath} with local-rag`;
+}
+
+export async function ensureMcpJson(projectDir: string, ides?: IDE[]): Promise<string[]> {
   const actions: string[] = [];
   const entry = mcpServerEntry(projectDir);
+  const forced = new Set(ides);
 
-  // Claude Code — .mcp.json
-  const claudeMcpPath = join(projectDir, ".mcp.json");
-  if (existsSync(claudeMcpPath)) {
-    const raw = JSON.parse(await readFile(claudeMcpPath, "utf-8"));
-    if (!raw.mcpServers?.["local-rag"]) {
-      raw.mcpServers = raw.mcpServers || {};
-      raw.mcpServers["local-rag"] = entry;
-      await writeFile(claudeMcpPath, JSON.stringify(raw, null, 2) + "\n");
-      actions.push("Added local-rag to .mcp.json");
-    }
-  } else {
-    await writeFile(
-      claudeMcpPath,
-      JSON.stringify({ mcpServers: { "local-rag": entry } }, null, 2) + "\n"
-    );
-    actions.push("Created .mcp.json with local-rag");
-  }
+  // Claude Code — .mcp.json (always)
+  const claudeAction = await upsertMcpJson(join(projectDir, ".mcp.json"), entry);
+  if (claudeAction) actions.push(claudeAction);
 
   // Cursor — .cursor/mcp.json
-  if (existsSync(join(projectDir, ".cursor"))) {
-    const cursorMcpPath = join(projectDir, ".cursor", "mcp.json");
-    if (existsSync(cursorMcpPath)) {
-      const raw = JSON.parse(await readFile(cursorMcpPath, "utf-8"));
-      if (!raw.mcpServers?.["local-rag"]) {
-        raw.mcpServers = raw.mcpServers || {};
-        raw.mcpServers["local-rag"] = entry;
-        await writeFile(cursorMcpPath, JSON.stringify(raw, null, 2) + "\n");
-        actions.push("Added local-rag to .cursor/mcp.json");
-      }
-    } else {
-      await writeFile(
-        cursorMcpPath,
-        JSON.stringify({ mcpServers: { "local-rag": entry } }, null, 2) + "\n"
-      );
-      actions.push("Created .cursor/mcp.json with local-rag");
-    }
+  if (forced.has("cursor") || existsSync(join(projectDir, ".cursor"))) {
+    const action = await upsertMcpJson(join(projectDir, ".cursor", "mcp.json"), entry);
+    if (action) actions.push(action);
   }
 
   // Windsurf — .windsurf/mcp.json
-  if (existsSync(join(projectDir, ".windsurf"))) {
-    const windsurfMcpPath = join(projectDir, ".windsurf", "mcp.json");
-    if (existsSync(windsurfMcpPath)) {
-      const raw = JSON.parse(await readFile(windsurfMcpPath, "utf-8"));
-      if (!raw.mcpServers?.["local-rag"]) {
-        raw.mcpServers = raw.mcpServers || {};
-        raw.mcpServers["local-rag"] = entry;
-        await writeFile(windsurfMcpPath, JSON.stringify(raw, null, 2) + "\n");
-        actions.push("Added local-rag to .windsurf/mcp.json");
-      }
-    } else {
-      await writeFile(
-        windsurfMcpPath,
-        JSON.stringify({ mcpServers: { "local-rag": entry } }, null, 2) + "\n"
-      );
-      actions.push("Created .windsurf/mcp.json with local-rag");
-    }
+  if (forced.has("windsurf") || existsSync(join(projectDir, ".windsurf"))) {
+    const action = await upsertMcpJson(join(projectDir, ".windsurf", "mcp.json"), entry);
+    if (action) actions.push(action);
   }
 
   return actions;
@@ -249,16 +251,16 @@ export function confirm(question: string): Promise<boolean> {
   });
 }
 
-export async function runSetup(projectDir: string): Promise<SetupResult> {
+export async function runSetup(projectDir: string, ides?: IDE[]): Promise<SetupResult> {
   const actions: string[] = [];
 
   const configAction = await ensureConfig(projectDir);
   if (configAction) actions.push(configAction);
 
-  const instructionActions = await ensureAgentInstructions(projectDir);
+  const instructionActions = await ensureAgentInstructions(projectDir, ides);
   actions.push(...instructionActions);
 
-  const mcpActions = await ensureMcpJson(projectDir);
+  const mcpActions = await ensureMcpJson(projectDir, ides);
   actions.push(...mcpActions);
 
   const gitignoreAction = await ensureGitignore(projectDir);
