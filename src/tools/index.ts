@@ -9,7 +9,7 @@ import { registerCheckpointTools } from "./checkpoint-tools";
 import { registerAnnotationTools } from "./annotation-tools";
 import { registerAnalyticsTools } from "./analytics-tools";
 import { registerGitTools } from "./git-tools";
-import { registerServerInfoTools } from "./server-info-tools";
+import { registerServerInfoTools, type ConnectedDBInfo } from "./server-info-tools";
 
 export type GetDB = (dir: string) => RagDB;
 
@@ -24,7 +24,11 @@ export async function resolveProject(
   return { projectDir, db: getDB(projectDir), config };
 }
 
-export function registerAllTools(server: McpServer, getDB: (dir: string) => RagDB) {
+export function registerAllTools(
+  server: McpServer,
+  getDB: (dir: string) => RagDB,
+  getConnectedDBs?: () => ConnectedDBInfo[],
+) {
   registerSearchTools(server, getDB);
   registerIndexTools(server, getDB);
   registerGraphTools(server, getDB);
@@ -33,5 +37,5 @@ export function registerAllTools(server: McpServer, getDB: (dir: string) => RagD
   registerAnnotationTools(server, getDB);
   registerAnalyticsTools(server, getDB);
   registerGitTools(server, getDB);
-  registerServerInfoTools(server, getDB);
+  registerServerInfoTools(server, getDB, getConnectedDBs);
 }

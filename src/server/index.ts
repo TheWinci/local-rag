@@ -18,7 +18,13 @@ const { version } = await import("../../package.json");
 
 // Lazy-init DB per project directory — keep all open to avoid
 // closing a DB that background tasks (auto-index, watcher) still use.
-const dbMap = new Map<string, RagDB>();
+// Cleanup happens on process exit (signals + stdin EOF).
+interface DBEntry {
+  db: RagDB;
+  openedAt: Date;
+  lastAccessed: Date;
+}
+const dbMap = new Map<string, DBEntry>();
 let initError: string | null = null;
 
 function getDB(projectDir: string): RagDB {
@@ -27,14 +33,26 @@ function getDB(projectDir: string): RagDB {
   }
 
   const resolved = resolve(projectDir);
-  let db = dbMap.get(resolved);
-  
-  if (db) return db;
-  
-  db = new RagDB(resolved);
-  dbMap.set(resolved, db);
-  
+  let entry = dbMap.get(resolved);
+
+  if (entry) {
+    entry.lastAccessed = new Date();
+    return entry.db;
+  }
+
+  const db = new RagDB(resolved);
+  dbMap.set(resolved, { db, openedAt: new Date(), lastAccessed: new Date() });
+
   return db;
+}
+
+/** Returns info about all currently open database connections. */
+export function getConnectedDBs(): Array<{ projectDir: string; openedAt: Date; lastAccessed: Date }> {
+  return Array.from(dbMap.entries()).map(([dir, entry]) => ({
+    projectDir: dir,
+    openedAt: entry.openedAt,
+    lastAccessed: entry.lastAccessed,
+  }));
 }
 
 /** Write crash details to .rag/server-error.log so they're visible outside stderr */
@@ -72,7 +90,7 @@ export async function startServer() {
     });
 
     // Register all MCP tools
-    registerAllTools(server, getDB);
+    registerAllTools(server, getDB, getConnectedDBs);
   } catch (err) {
     // If we crash before connecting transport, the MCP client just sees
     // "Connection closed" with no details. Write diagnostics to a file.
@@ -284,10 +302,22 @@ export async function startServer() {
     log.debug("Shutting down...", "shutdown");
     if (watcher) watcher.close();
     if (convWatcher) convWatcher.close();
-    for (const d of dbMap.values()) d.close();
+    for (const entry of dbMap.values()) entry.db.close();
     dbMap.clear();
     process.exit(0);
   }
+
+  // Detect stdin close — happens when the IDE (Cursor, VS Code) closes
+  // the window without sending a signal. Without this, the process and
+  // its database connections stay alive indefinitely.
+  process.stdin.on("end", () => {
+    log.debug("stdin closed (IDE window likely closed)", "shutdown");
+    cleanup("stdin closed");
+  });
+  process.stdin.on("error", () => {
+    // EPIPE / EIO — same situation, pipe is gone
+    cleanup("stdin error");
+  });
 
   process.on("SIGINT", () => cleanup("SIGINT"));
   process.on("SIGTERM", () => cleanup("SIGTERM"));
