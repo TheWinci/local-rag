@@ -1,7 +1,15 @@
+.DS_Store
+
 node_modules/
 .rag/
+.claude/
+
+.mcp.json
+
 *.db
+
+completed-plan-phases.md
 PLAN.md
 CLAUDE.md
-completed-plan-phases.md
-.DS_Store
+ROADMAP.md
+PROCESS.md

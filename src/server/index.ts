@@ -25,11 +25,15 @@ function getDB(projectDir: string): RagDB {
   if (initError) {
     throw new Error(initError);
   }
+
   const resolved = resolve(projectDir);
   let db = dbMap.get(resolved);
+  
   if (db) return db;
+  
   db = new RagDB(resolved);
   dbMap.set(resolved, db);
+  
   return db;
 }
 
