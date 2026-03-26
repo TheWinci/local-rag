@@ -53,12 +53,10 @@ function hashString(content: string): string {
 }
 
 /**
- * Hard cap on files to collect. Prevents OOM when the project directory
- * accidentally resolves to ~ or / and glob starts walking the entire FS.
- * 100 000 source files is already a very large monorepo — anything beyond
- * that almost certainly means the directory is wrong.
+ * Threshold at which we warn the user that the directory may be too broad.
+ * We no longer abort — large monorepos can legitimately exceed this count.
  */
-const MAX_COLLECT_FILES = 100_000;
+const LARGE_PROJECT_WARN_THRESHOLD = 200_000;
 
 /**
  * Build a fast filter from include patterns. Most patterns are either
@@ -162,14 +160,6 @@ async function collectFiles(
 
   const allEntries = await readdir(directory, { recursive: true });
 
-  if (allEntries.length > MAX_COLLECT_FILES) {
-    throw new Error(
-      `Aborting: found more than ${MAX_COLLECT_FILES.toLocaleString()} filesystem entries in "${directory}". ` +
-      `This usually means RAG_PROJECT_DIR is not set and the server defaulted to your home folder or another broad directory. ` +
-      `Set RAG_PROJECT_DIR to your actual project path in your MCP server config.`
-    );
-  }
-
   const results: string[] = [];
   let lastReport = 0;
 
@@ -184,6 +174,14 @@ async function collectFiles(
       onProgress?.(`scanning files… ${results.length} found`);
       lastReport = now;
     }
+  }
+
+  if (results.length > LARGE_PROJECT_WARN_THRESHOLD) {
+    const msg =
+      `Warning: found ${results.length.toLocaleString()} indexable files in "${directory}". ` +
+      `If this is unintentional, set RAG_PROJECT_DIR to your actual project path in your MCP server config.`;
+    _onWarning?.(msg);
+    onProgress?.(msg);
   }
 
   onProgress?.(`scanning files… ${results.length} found`);
