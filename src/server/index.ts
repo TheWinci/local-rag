@@ -25,11 +25,14 @@ interface DBEntry {
   lastAccessed: Date;
 }
 const dbMap = new Map<string, DBEntry>();
-let initError: string | null = null;
+// Permanent (non-retryable) init errors — filesystem permission failures, missing
+// native libs, etc. Transient errors like "database is locked" are NOT cached here
+// so the next tool call can retry.
+let permanentError: string | null = null;
 
 function getDB(projectDir: string): RagDB {
-  if (initError) {
-    throw new Error(initError);
+  if (permanentError) {
+    throw new Error(permanentError);
   }
 
   const resolved = resolve(projectDir);
@@ -125,33 +128,42 @@ export async function startServer() {
     startupDb = getDB(startupDir);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const isTransient = msg.includes("database is locked") || msg.includes("SQLITE_BUSY");
     const fix = msg.includes("brew install sqlite")
       ? `Fix: run "brew install sqlite" and restart your editor.`
       : msg.includes("EROFS") || msg.includes("EACCES")
         ? `Fix: set RAG_DB_DIR to a writable directory in your MCP config.`
         : `Check the local-rag README for setup instructions.`;
 
-    initError = `${msg}\n\n${fix}`;
-    log.error(`FATAL: ${msg} — ${fix}`, "db");
+    if (isTransient) {
+      // Transient lock — another process was briefly holding the DB.
+      // Don't cache the error; the next tool call will retry getDB().
+      log.warn(`Startup DB open failed (transient, will retry on next tool call): ${msg}`, "db");
+    } else {
+      // Permanent failure — cache so every tool call gets a clear message
+      permanentError = `${msg}\n\n${fix}`;
+      log.error(`FATAL: ${msg} — ${fix}`, "db");
+    }
 
     // Write the error to status so it's visible to the user/IDE
     const ragDir = join(startupDir, ".rag");
     try {
       mkdirSync(ragDir, { recursive: true });
       writeFileSync(join(ragDir, "status"), [
-        `error`,
+        isTransient ? `starting` : `error`,
         `version: ${version}`,
         `failed: ${new Date().toISOString()}`,
         msg,
         ``,
-        fix,
+        isTransient ? `Will retry on next tool call` : fix,
       ].join("\n"));
     } catch (statusErr) {
       log.warn(`Could not write status: ${statusErr instanceof Error ? statusErr.message : statusErr}`, "status");
     }
 
-    // Server is already connected — just return and let tool calls
-    // hit the initError guard in getDB()
+    // For permanent errors, tool calls hit the permanentError guard.
+    // For transient errors, tool calls retry getDB() which may succeed.
+    // Either way, skip startup indexing — it requires an open DB.
     return;
   }
 
