@@ -76,12 +76,13 @@ export function vectorSearchChunks(db: Database, queryEmbedding: Float32Array, t
         chunk_type: string | null;
         start_line: number | null;
         end_line: number | null;
+        parent_id: number | null;
         path: string;
       },
       [Uint8Array, number]
     >(
       `SELECT v.chunk_id, v.distance, c.snippet, c.chunk_index, c.entity_name, c.chunk_type,
-              c.start_line, c.end_line, f.path
+              c.start_line, c.end_line, c.parent_id, f.path
        FROM (SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ?) v
        JOIN chunks c ON c.id = v.chunk_id
        JOIN files f ON f.id = c.file_id`
@@ -96,6 +97,7 @@ export function vectorSearchChunks(db: Database, queryEmbedding: Float32Array, t
       chunkType: row.chunk_type,
       startLine: row.start_line,
       endLine: row.end_line,
+      parentId: row.parent_id,
     }));
 }
 
@@ -109,13 +111,14 @@ export function textSearchChunks(db: Database, query: string, topK: number = 8):
         chunk_type: string | null;
         start_line: number | null;
         end_line: number | null;
+        parent_id: number | null;
         rank: number;
         path: string;
       },
       [string, number]
     >(
       `SELECT c.snippet, c.chunk_index, c.entity_name, c.chunk_type, c.start_line, c.end_line,
-              f.path, rank
+              c.parent_id, f.path, rank
        FROM fts_chunks fts
        JOIN chunks c ON c.id = fts.rowid
        JOIN files f ON f.id = c.file_id
@@ -133,6 +136,7 @@ export function textSearchChunks(db: Database, query: string, topK: number = 8):
       chunkType: row.chunk_type,
       startLine: row.start_line,
       endLine: row.end_line,
+      parentId: row.parent_id,
     }));
 }
 

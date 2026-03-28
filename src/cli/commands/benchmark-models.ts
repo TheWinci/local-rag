@@ -83,7 +83,7 @@ export async function benchmarkModelsCommand(args: string[], getFlag: (flag: str
 
       // Benchmark
       console.log("  Running benchmark...");
-      const summary = await runBenchmark(queries, db, dir, top, config.hybridWeight, config.enableReranking);
+      const summary = await runBenchmark(queries, db, dir, top, config.hybridWeight);
 
       results.push({ model, summary, indexTimeMs });
 

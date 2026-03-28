@@ -48,7 +48,6 @@ export function registerServerInfoTools(
         `  chunk_overlap:   ${config.chunkOverlap}`,
         `  hybrid_weight:   ${config.hybridWeight}`,
         `  search_top_k:    ${config.searchTopK}`,
-        `  reranking:       ${config.enableReranking}`,
         `  incremental:     ${config.incrementalChunks}`,
         `  include:         ${config.include.length} patterns`,
         `  exclude:         ${config.exclude.length} patterns`,

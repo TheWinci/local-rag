@@ -7,6 +7,7 @@ export interface StoredChunk {
   chunkType: string | null;
   startLine: number | null;
   endLine: number | null;
+  parentId: number | null;
 }
 
 export interface StoredFile {
@@ -34,6 +35,7 @@ export interface ChunkSearchResult {
   chunkType: string | null;
   startLine: number | null;
   endLine: number | null;
+  parentId: number | null;
 }
 
 export interface UsageResult {

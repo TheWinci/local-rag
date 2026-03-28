@@ -2,7 +2,7 @@ import { relative, resolve, extname, basename } from "path";
 import { createHash } from "crypto";
 import { readFile, stat, readdir } from "fs/promises";
 import { parseFile } from "./parse";
-import { embedBatch, embedBatchMerged } from "../embeddings/embed";
+import { embedBatch, embedBatchMerged, mergeEmbeddings } from "../embeddings/embed";
 import { chunkText, KNOWN_EXTENSIONS, type ChunkImport, type ChunkExport } from "./chunker";
 import { RagDB } from "../db";
 import { type RagConfig } from "../config";
@@ -223,18 +223,111 @@ interface ProcessFileOptions {
  */
 function buildEmbeddedChunk(chunk: import("./chunker").Chunk, embedding: Float32Array): EmbeddedChunk {
   const primaryExport = chunk.exports?.[0];
-  const entityName = chunk.parentName && primaryExport?.name
-    ? `${chunk.parentName}.${primaryExport.name}`
-    : primaryExport?.name ?? null;
+  const symbolName = primaryExport?.name ?? chunk.name ?? null;
+  const entityName = chunk.parentName && symbolName
+    ? `${chunk.parentName}.${symbolName}`
+    : symbolName;
   return {
     snippet: chunk.text,
     embedding,
     entityName,
-    chunkType: primaryExport?.type ?? null,
+    chunkType: primaryExport?.type ?? chunk.chunkType ?? null,
     startLine: chunk.startLine ?? null,
     endLine: chunk.endLine ?? null,
     contentHash: chunk.hash ?? null,
   };
+}
+
+/**
+ * Detect groups of consecutive chunks that belong to the same parent entity.
+ * A parent group consists of:
+ *  - Bookend chunks: type "class"/"function" with name matching the parent
+ *  - Child chunks: chunks with parentName set to the parent
+ *
+ * Returns groups of ≥2 chunks that share the same parent, with their indices.
+ */
+interface ParentGroup {
+  parentName: string;
+  /** Indices into the original chunks array */
+  memberIndices: number[];
+  /** The chunk type of the bookend (e.g. "class", "function") if found */
+  bookendType: string | null;
+}
+
+function detectParentGroups(chunks: import("./chunker").Chunk[]): ParentGroup[] {
+  const groups = new Map<string, ParentGroup>();
+
+  for (let i = 0; i < chunks.length; i++) {
+    const c = chunks[i];
+    let groupName: string | null = null;
+
+    if (c.parentName) {
+      // Child chunk (method, field, etc.) or bookend with same name as parent
+      groupName = c.parentName;
+    } else if (c.exports?.[0]?.name) {
+      // Check if this is a bookend: next or prev chunk has parentName matching this export
+      const exportName = c.exports[0].name;
+      const nextIsChild = chunks[i + 1]?.parentName === exportName;
+      const prevIsChild = i > 0 && chunks[i - 1]?.parentName === exportName;
+      if (nextIsChild || prevIsChild) {
+        groupName = exportName;
+      }
+    }
+
+    if (!groupName) continue;
+
+    if (!groups.has(groupName)) {
+      groups.set(groupName, { parentName: groupName, memberIndices: [], bookendType: null });
+    }
+    const g = groups.get(groupName)!;
+    g.memberIndices.push(i);
+
+    // Track bookend type
+    if (c.chunkType && (c.chunkType === "class" || c.chunkType === "function") && c.exports?.[0]?.name === groupName) {
+      g.bookendType = c.chunkType;
+    }
+  }
+
+  // Only return groups with ≥2 members
+  return [...groups.values()].filter((g) => g.memberIndices.length >= 2);
+}
+
+/**
+ * Create parent chunks from detected groups: concatenate text, merge embeddings.
+ * Inserts parent chunks into DB and sets parent_id on children.
+ */
+function createParentChunks(
+  groups: ParentGroup[],
+  chunks: import("./chunker").Chunk[],
+  embeddedChunks: EmbeddedChunk[],
+  fileId: number,
+  db: RagDB
+): void {
+  for (const group of groups) {
+    const memberEmbeddings = group.memberIndices.map((i) => embeddedChunks[i].embedding);
+    const memberTexts = group.memberIndices.map((i) => chunks[i].text);
+    const memberStartLines = group.memberIndices.map((i) => chunks[i].startLine).filter((l): l is number => l != null);
+    const memberEndLines = group.memberIndices.map((i) => chunks[i].endLine).filter((l): l is number => l != null);
+
+    const parentChunk: EmbeddedChunk = {
+      snippet: memberTexts.join("\n\n"),
+      embedding: mergeEmbeddings(memberEmbeddings),
+      entityName: group.parentName,
+      chunkType: group.bookendType ?? "class",
+      startLine: memberStartLines.length > 0 ? Math.min(...memberStartLines) : null,
+      endLine: memberEndLines.length > 0 ? Math.max(...memberEndLines) : null,
+      contentHash: hashString(memberTexts.join("\n\n")),
+    };
+
+    // Insert parent, get its id
+    // Use chunk_index = -1 to distinguish parent chunks from regular ones
+    const parentId = db.insertChunkReturningId(fileId, parentChunk, -1);
+
+    // Update children with parent_id
+    for (const idx of group.memberIndices) {
+      embeddedChunks[idx].parentId = parentId;
+    }
+  }
 }
 
 /**
@@ -314,10 +407,8 @@ async function processFile(
   }
 
   // Full re-index: delete all chunks, re-embed, re-insert
-  const DB_BATCH = 500;
   const fileId = db.upsertFileStart(filePath, hash);
-  let chunkOffset = 0;
-  let pendingDbChunks: EmbeddedChunk[] = [];
+  const allEmbedded: EmbeddedChunk[] = [];
 
   for (let i = 0; i < chunks.length; i += batchSize) {
     if (signal?.aborted) break;
@@ -331,21 +422,29 @@ async function processFile(
     );
 
     for (let j = 0; j < batch.length; j++) {
-      pendingDbChunks.push(buildEmbeddedChunk(batch[j], embeddings[j]));
+      allEmbedded.push(buildEmbeddedChunk(batch[j], embeddings[j]));
     }
 
-    // Flush to DB when we hit DB_BATCH size or on last iteration
-    if (pendingDbChunks.length >= DB_BATCH || i + batchSize >= chunks.length) {
-      if (signal?.aborted) break;
-      db.insertChunkBatch(fileId, pendingDbChunks, chunkOffset);
-      onProgress?.(`Writing ${Math.min(chunkOffset + pendingDbChunks.length, chunks.length)}/${chunks.length} chunks for ${relPath}`, { transient: true });
-      chunkOffset += pendingDbChunks.length;
-      pendingDbChunks = [];
-      await Bun.sleep(0);
-    }
+    onProgress?.(`Embedded ${Math.min(i + batchSize, chunks.length)}/${chunks.length} chunks for ${relPath}`, { transient: true });
+    await Bun.sleep(0);
   }
 
   if (signal?.aborted) return "skipped";
+
+  // Detect parent groups and create parent chunks before writing children
+  const parentGroups = detectParentGroups(chunks);
+  if (parentGroups.length > 0) {
+    createParentChunks(parentGroups, chunks, allEmbedded, fileId, db);
+  }
+
+  // Write all child chunks (now with parent_id set where applicable)
+  const DB_BATCH = 500;
+  for (let i = 0; i < allEmbedded.length; i += DB_BATCH) {
+    if (signal?.aborted) break;
+    const batch = allEmbedded.slice(i, i + DB_BATCH);
+    db.insertChunkBatch(fileId, batch, i);
+    onProgress?.(`Writing ${Math.min(i + DB_BATCH, allEmbedded.length)}/${allEmbedded.length} chunks for ${relPath}`, { transient: true });
+  }
 
   // Store graph metadata — use file-level data from bun-chunk when available
   const graphData = chunkResult.fileImports && chunkResult.fileExports

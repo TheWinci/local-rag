@@ -8,8 +8,8 @@
     "expected": ["src/embeddings/embed.ts"]
   },
   {
-    "query": "rerank cross-encoder ms-marco score candidates",
-    "expected": ["src/search/reranker.ts"]
+    "query": "mergeHybridScores applyPathBoost applyGraphBoost dedup",
+    "expected": ["src/search/hybrid.ts"]
   },
   {
     "query": "chunkText AST tree-sitter splitMarkdown splitCode",

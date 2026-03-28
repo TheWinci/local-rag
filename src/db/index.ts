@@ -272,6 +272,7 @@ export class RagDB {
     `);
 
     this.migrateChunksEntityColumns();
+    this.migrateParentChunkColumns();
     this.migrateGraphColumns();
   }
 
@@ -295,6 +296,17 @@ export class RagDB {
     }
     if (!cols.includes("content_hash")) {
       this.db.exec("ALTER TABLE chunks ADD COLUMN content_hash TEXT");
+    }
+  }
+
+  private migrateParentChunkColumns() {
+    const cols = this.db
+      .query<{ name: string }, []>("PRAGMA table_info(chunks)")
+      .all()
+      .map((c) => c.name);
+
+    if (!cols.includes("parent_id")) {
+      this.db.exec("ALTER TABLE chunks ADD COLUMN parent_id INTEGER REFERENCES chunks(id) ON DELETE CASCADE");
     }
   }
 
@@ -340,6 +352,12 @@ export class RagDB {
   }
   insertChunkBatch(fileId: number, chunks: EmbeddedChunk[], startIndex: number) {
     fileOps.insertChunkBatch(this.db, fileId, chunks, startIndex);
+  }
+  insertChunkReturningId(fileId: number, chunk: EmbeddedChunk, chunkIndex: number) {
+    return fileOps.insertChunkReturningId(this.db, fileId, chunk, chunkIndex);
+  }
+  getChunkById(chunkId: number) {
+    return fileOps.getChunkById(this.db, chunkId);
   }
   upsertFile(path: string, hash: string, chunks: EmbeddedChunk[]) {
     fileOps.upsertFile(this.db, path, hash, chunks);

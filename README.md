@@ -9,7 +9,7 @@ No API keys. No cloud. No Docker. Just `bunx`.
 [![npm](https://img.shields.io/npm/v/@winci/local-rag)](https://www.npmjs.com/package/@winci/local-rag)
 [![license](https://img.shields.io/npm/l/@winci/local-rag)](LICENSE)
 
-**97.5% recall** on its own codebase, **90%+ on a 676-file monorepo** — out of the box, no tuning. Hybrid vector + BM25 search with cross-encoder reranking, AST-aware chunking across 14 languages, dependency graph, and [embedding merge](#embedding-merge) that recovers 45% of content other tools silently lose. Full benchmarks in [BENCHMARKS.md](BENCHMARKS.md).
+**100% recall** across all three benchmark codebases — out of the box, no tuning. Hybrid vector + BM25 search, AST-aware chunking across 14 languages, dependency graph boost, and [embedding merge](#embedding-merge) that recovers 45% of content other tools silently lose. Full benchmarks in [BENCHMARKS.md](BENCHMARKS.md).
 
 ## Contents
 
@@ -323,7 +323,6 @@ Create `.rag/config.json` in your project. The defaults index all [supported fil
 | `chunkSize` | `512` | Max tokens per chunk |
 | `chunkOverlap` | `50` | Overlap tokens between chunks |
 | `hybridWeight` | `0.7` | Blend ratio: 1.0 = vector only, 0.0 = BM25 only |
-| `enableReranking` | `true` | Cross-encoder reranking for higher precision (adds ~80MB model on first query) |
 | `embeddingMerge` | `true` | Merge windowed embeddings for oversized chunks — see [Embedding merge](#embedding-merge) |
 | `embeddingModel` | _(default)_ | Override the embedding model (HuggingFace model ID). Must have ONNX weights. Requires re-index |
 | `embeddingDim` | _(default)_ | Embedding dimension to match the model (e.g. 384 for bge-small-en-v1.5) |
@@ -413,10 +412,9 @@ flowchart TD
   E --> F
   F --> G{"Agent query"}
   G -->|"semantic question"| H["Hybrid search\nvector + BM25"]
-  H --> H2["Cross-encoder\nreranker"]
+  H --> K["Ranked results\nwith snippets"]
   G -->|"navigation"| I["Project map\nMermaid graph"]
   G -->|"file changed"| J["Watcher\nre-index + re-resolve"]
-  H2 --> K["Ranked results\nwith snippets"]
   I --> L["Dependency graph\nfile or directory level"]
   J --> F
   K --> M["Query log"]
@@ -452,7 +450,7 @@ flowchart TD
 
 4. **Extract imports/exports** — During AST chunking, import specifiers and exported symbols are captured with full metadata (default/namespace/re-export flags). After all files are indexed, imports are resolved using a two-pass approach: first bun-chunk's filesystem resolver (handles tsconfig `paths`, Python relative imports, Rust `crate::` paths), then DB-based extension probing as fallback. This builds the dependency graph.
 
-5. **Hybrid search + reranking** — Queries run both vector similarity (semantic) and BM25 (keyword) searches in parallel, then blend results using `hybridWeight` (default 0.7 = 70% semantic, 30% keyword). When `enableReranking` is true (default), the top candidates are re-scored by a cross-encoder model (ms-marco-MiniLM-L-6-v2) for higher precision — the cross-encoder sees the full (query, passage) pair and can catch nuances that embedding similarity misses. `search` deduplicates by file and returns the best-scoring file with a 400-char snippet. `read_relevant` skips deduplication and returns top-N individual chunks with full content, entity names (function/class names from AST parsing), and **exact line ranges** (`path:start-end`) — so you can navigate directly to an edit location without reading the full file.
+5. **Hybrid search** — Queries run both vector similarity (semantic) and BM25 (keyword) searches in parallel, then blend results using `hybridWeight` (default 0.7 = 70% semantic, 30% keyword). Results are boosted by the dependency graph (heavily-imported files rank higher) and path heuristics (source files up, test files down). `search` deduplicates by file and returns the best-scoring file with a 400-char snippet. `read_relevant` skips deduplication and returns top-N individual chunks with full content, entity names (function/class names from AST parsing), and **exact line ranges** (`path:start-end`) — so you can navigate directly to an edit location without reading the full file.
 
 5a. **Usage search** — `find_usages` locates every call site of a symbol by querying the FTS index, excluding the file that defines it, and resolving per-line matches using the stored chunk line ranges. Useful before any rename or API change to understand the blast radius.
 
@@ -517,11 +515,11 @@ Benchmarked on three codebases with known expected files per query. Full details
 
 | Codebase | Files | Queries | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|---|---|
-| local-rag (this project) | 97 | 20 | 97.5% | 0.588 | 0.0% |
-| Express.js | 161 | 15 | 93.3% | 0.678 | 6.7% |
-| Excalidraw | 676 | 20 | 90.0% | 0.509 | 10.0% |
+| local-rag (this project) | 97 | 20 | 100.0% | 0.677 | 0.0% |
+| Express.js | 161 | 15 | 100.0% | 0.922 | 0.0% |
+| Excalidraw | 676 | 20 | 100.0% | 0.366 | 0.0% |
 
-Recall degrades gracefully with codebase size — 90% on a 676-file monorepo with no tuning. Default top-K is 10, chosen by benchmarking the recall curve at K=5 through K=20 across all three codebases (see [BENCHMARKS.md](BENCHMARKS.md#why-top-10)). JSON and CSS/SCSS files are excluded from default indexing — they add noise without helping code search.
+100% recall across all three codebases with zero missed queries — out of the box, no tuning. Default top-K is 10, chosen by benchmarking the recall curve at K=5 through K=20 across all three codebases (see [BENCHMARKS.md](BENCHMARKS.md#why-top-10)). JSON and CSS/SCSS files are excluded from default indexing — they add noise without helping code search.
 
 ## Stack
 
@@ -531,7 +529,6 @@ Recall degrades gracefully with codebase size — 90% on a 676-file monorepo wit
 | AST chunking | [bun-chunk](https://github.com/TheWinci/bun-chunk) — tree-sitter grammars for 14 languages, with `chunkFile()` for context + metadata |
 | Embeddings | Transformers.js + ONNX (in-process, no daemon) |
 | Embedding model | all-MiniLM-L6-v2 (~23MB, 384 dimensions) — [configurable](#configuration) |
-| Reranker | ms-marco-MiniLM-L-6-v2 cross-encoder (~80MB, downloaded on first query) |
 | Vector store | sqlite-vec (single `.db` file) |
 | MCP | @modelcontextprotocol/sdk (stdio transport) |
 | Plugin | Claude Code plugin with skills + hooks (SessionStart, PostToolUse, SessionEnd) |

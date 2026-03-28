@@ -129,7 +129,7 @@ function tokenWindows(
   return windows;
 }
 
-function mergeEmbeddings(embeddings: Float32Array[]): Float32Array {
+export function mergeEmbeddings(embeddings: Float32Array[]): Float32Array {
   const dim = embeddings[0].length;
   const avg = new Float32Array(dim);
   for (const emb of embeddings) {

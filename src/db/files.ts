@@ -60,10 +60,10 @@ export function insertChunkBatch(
 ) {
   const tx = db.transaction(() => {
     for (let i = 0; i < chunks.length; i++) {
-      const { snippet, embedding, entityName, chunkType, startLine, endLine, contentHash } = chunks[i];
+      const { snippet, embedding, entityName, chunkType, startLine, endLine, contentHash, parentId } = chunks[i];
       db.run(
-        "INSERT INTO chunks (file_id, chunk_index, snippet, entity_name, chunk_type, start_line, end_line, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        [fileId, startIndex + i, snippet, entityName ?? null, chunkType ?? null, startLine ?? null, endLine ?? null, contentHash ?? null]
+        "INSERT INTO chunks (file_id, chunk_index, snippet, entity_name, chunk_type, start_line, end_line, content_hash, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [fileId, startIndex + i, snippet, entityName ?? null, chunkType ?? null, startLine ?? null, endLine ?? null, contentHash ?? null, parentId ?? null]
       );
       const chunkId = Number(
         db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id
@@ -75,6 +75,53 @@ export function insertChunkBatch(
     }
   });
   tx();
+}
+
+/** Insert a single chunk and return its DB id (used for parent chunks). */
+export function insertChunkReturningId(
+  db: Database,
+  fileId: number,
+  chunk: EmbeddedChunk,
+  chunkIndex: number
+): number {
+  const { snippet, embedding, entityName, chunkType, startLine, endLine, contentHash } = chunk;
+  db.run(
+    "INSERT INTO chunks (file_id, chunk_index, snippet, entity_name, chunk_type, start_line, end_line, content_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [fileId, chunkIndex, snippet, entityName ?? null, chunkType ?? null, startLine ?? null, endLine ?? null, contentHash ?? null]
+  );
+  const chunkId = Number(
+    db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id
+  );
+  db.run(
+    "INSERT INTO vec_chunks (chunk_id, embedding) VALUES (?, ?)",
+    [chunkId, new Uint8Array(embedding.buffer)]
+  );
+  return chunkId;
+}
+
+/** Fetch a chunk by its DB id (for parent chunk lookup at query time). */
+export function getChunkById(
+  db: Database,
+  chunkId: number
+): { snippet: string; entityName: string | null; chunkType: string | null; startLine: number | null; endLine: number | null; path: string } | null {
+  return db
+    .query<
+      { snippet: string; entity_name: string | null; chunk_type: string | null; start_line: number | null; end_line: number | null; path: string },
+      [number]
+    >(
+      `SELECT c.snippet, c.entity_name, c.chunk_type, c.start_line, c.end_line, f.path
+       FROM chunks c JOIN files f ON f.id = c.file_id
+       WHERE c.id = ?`
+    )
+    .all(chunkId)
+    .map((row) => ({
+      snippet: row.snippet,
+      entityName: row.entity_name,
+      chunkType: row.chunk_type,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      path: row.path,
+    }))[0] ?? null;
 }
 
 export function upsertFile(

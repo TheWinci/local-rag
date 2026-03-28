@@ -7,4 +7,5 @@ export interface EmbeddedChunk {
   startLine?: number | null;
   endLine?: number | null;
   contentHash?: string | null;
+  parentId?: number | null;
 }

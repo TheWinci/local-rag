@@ -12,6 +12,10 @@ export interface Chunk {
   imports?: ChunkImport[];
   exports?: ChunkExport[];
   parentName?: string;
+  /** Symbol name from AST (e.g. "emit", "constructor") — available even without exports */
+  name?: string;
+  /** AST chunk type (e.g. "method", "field", "class") — available even without exports */
+  chunkType?: string;
   hash?: string;
 }
 
@@ -133,6 +137,8 @@ async function _chunkText(
           if (c.imports?.length) chunk.imports = c.imports;
           if (c.exports?.length) chunk.exports = c.exports;
           if (c.parentName) chunk.parentName = c.parentName;
+          if (c.name) chunk.name = c.name;
+          if (c.type) chunk.chunkType = c.type;
           if (c.hash) chunk.hash = c.hash;
           return chunk;
         });

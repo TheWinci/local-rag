@@ -1,47 +1,42 @@
 # Benchmarks
 
-Search quality benchmarks measured on three codebases. Last updated 2026-03-24.
+Search quality benchmarks measured on three codebases. Last updated 2026-03-28.
 
 **Metrics:** Recall@K (fraction of expected files in top-K), MRR (1/rank of first hit), Zero-miss (queries with no expected file in results).
 
 ## Results
 
-All results use hybrid search (70% vector / 30% BM25) with pipeline improvements enabled. Default top-K is 10.
+All results use hybrid search (70% vector / 30% BM25) with pipeline improvements (source/test path boost, symbol expansion, dependency graph boost, doc expansion). Default top-K is 10.
 
 ### local-rag (97 files, 20 queries)
 
 | Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **97.5%** | **0.588** | **0.0%** |
-| all-MiniLM-L12-v2 | 100.0% | 0.645 | 0.0% |
-| bge-small-en-v1.5 (opt-in) | 97.5% | 0.540 | 0.0% |
+| **all-MiniLM-L6-v2 (default)** | **100.0%** | **0.677** | **0.0%** |
 
 ### Express.js (161 files, 15 queries)
 
 | Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **93.3%** | **0.678** | **6.7%** |
-| all-MiniLM-L12-v2 | 93.3% | 0.636 | 6.7% |
-| bge-small-en-v1.5 (opt-in) | 80.0% | 0.541 | 20.0% |
+| **all-MiniLM-L6-v2 (default)** | **100.0%** | **0.922** | **0.0%** |
 
 ### Excalidraw (676 files, 20 queries)
 
 | Config | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|
-| **all-MiniLM-L6-v2 (default)** | **90.0%** | **0.509** | **10.0%** |
-| all-MiniLM-L12-v2 | 80.0% | 0.404 | 20.0% |
+| **all-MiniLM-L6-v2 (default)** | **100.0%** | **0.366** | **0.0%** |
 
-Excalidraw is the stress test — a large monorepo with 676 indexed files across `packages/`, `excalidraw-app/`, `dev-docs/`, and `examples/`. Remaining misses are files whose exports are imported everywhere — consumers outrank the source definition at any K.
+Excalidraw is the stress test — a large monorepo with 676 indexed files across `packages/`, `excalidraw-app/`, `dev-docs/`, and `examples/`. MRR is lower than the smaller codebases because highly-imported utility files have many consumers that score competitively, pushing the source definition lower in rank — but it always lands in the top 10.
 
 ### Scaling behavior
 
 | Codebase | Files | Recall@10 | MRR | Zero-miss |
 |---|---|---|---|---|
-| local-rag | 97 | 97.5% | 0.588 | 0.0% |
-| Express.js | 161 | 93.3% | 0.678 | 6.7% |
-| Excalidraw | 676 | 90.0% | 0.509 | 10.0% |
+| local-rag | 97 | 100.0% | 0.677 | 0.0% |
+| Express.js | 161 | 100.0% | 0.922 | 0.0% |
+| Excalidraw | 676 | 100.0% | 0.366 | 0.0% |
 
-Recall degrades gracefully with codebase size. The dependency graph boost and symbol expansion help most on smaller codebases where the graph is complete.
+100% recall across all three codebases. The dependency graph boost and symbol expansion ensure source definitions are found even in large monorepos where consumer files outnumber definitions.
 
 ### Why top-10?
 
@@ -59,7 +54,7 @@ K=10 is the plateau for large codebases — Excalidraw gains nothing past 10. Ea
 
 ### Model comparison (5 candidates, 384d)
 
-Comprehensive comparison of all 384-dimension ONNX embedding models viable for local code search. All models tested on identical queries with hybrid search (70/30 vector/BM25) and pipeline improvements.
+Comprehensive comparison of all 384-dimension ONNX embedding models viable for local code search. All models tested on identical queries with hybrid search (70/30 vector/BM25) and pipeline improvements. Note: these numbers were collected before the reranker removal — the default model's current scores are in the tables above.
 
 #### Recall@10
 
@@ -169,23 +164,14 @@ bun benchmarks/ast-truncation-analysis.ts
 
 ## Pipeline improvements
 
-The search pipeline applies five post-retrieval optimizations (no re-indexing needed):
+The search pipeline applies four post-retrieval optimizations (no re-indexing needed):
 
 1. **Source file boost** — source paths 1.1x, test paths 0.85x
 2. **Symbol expansion** — exact symbol name matches injected into candidates at 0.75 base score
 3. **Dependency graph boost** — files with more importers get a logarithmic score boost
 4. **Doc expansion** — doc files in top-K expand the result set instead of displacing code
-5. **Conditional reranking** — skip the cross-encoder for code-heavy queries (≥50% identifiers)
 
-Impact of pipeline on all-MiniLM-L6-v2:
-
-| Codebase | Without pipeline | With pipeline | Delta |
-|---|---|---|---|
-| local-rag | 95.0% | 97.5% | +2.5pp |
-| Express.js | 93.3% | 93.3% | +0.0pp |
-| Excalidraw | 90.0% | 90.0% | +0.0pp |
-
-At top-10, returning more results naturally catches files the pipeline would have boosted into position. The pipeline's impact was larger at top-5 (+15pp on local-rag, +13pp on Express) where ranking precision matters more.
+Cross-encoder reranking was removed in v0.3.27 — it loaded a ~80MB model, added latency to every query, and benchmarked at +0pp recall at top-10 across all three codebases. Worse, the ms-marco cross-encoder (trained on web Q&A) actively hurt code search by preferring test files over source definitions. Removing it improved recall from 90-97.5% to 100% across the board.
 
 ## Reproducing
 

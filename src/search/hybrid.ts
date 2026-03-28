@@ -1,6 +1,5 @@
 import { embed } from "../embeddings/embed";
 import { RagDB, type SearchResult, type ChunkSearchResult } from "../db";
-import { rerank } from "./reranker";
 import { log } from "../utils/log";
 import { basename } from "path";
 
@@ -19,6 +18,7 @@ export interface ChunkResult {
   chunkType: string | null;
   startLine: number | null;
   endLine: number | null;
+  parentId: number | null;
 }
 
 // Default: 70% vector, 30% BM25
@@ -125,16 +125,6 @@ function mergeSymbolResults(
   }
 }
 
-// ── Code-query detection ────────────────────────────────────────
-// A query is "code-heavy" when most of its meaningful words are identifiers.
-// The ms-marco cross-encoder was trained on web Q&A and hurts ranking for
-// identifier-heavy queries — skip reranking in that case.
-function isCodeHeavyQuery(query: string, identifiers: string[]): boolean {
-  const words = query.split(/\s+/).filter((w) => w.length >= 3);
-  if (words.length === 0) return false;
-  return identifiers.length / words.length >= 0.5;
-}
-
 // ── Doc expansion ───────────────────────────────────────────────
 // Doc files (.md, .mdx) in results are useful context — they shouldn't
 // displace code results. When docs appear in top-K, expand the result
@@ -173,7 +163,6 @@ export async function search(
   topK: number = 5,
   threshold: number = 0,
   hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
-  enableReranking: boolean = false
 ): Promise<DedupedResult[]> {
   const start = performance.now();
   const queryEmbedding = await embed(query);
@@ -231,30 +220,8 @@ export async function search(
   const allSorted = applyGraphBoost(applyPathBoost(Array.from(byFile.values())), db)
     .sort((a, b) => b.score - a.score);
 
-  // Skip reranking for code-heavy queries (ms-marco cross-encoder hurts them)
-  const codeHeavy = isCodeHeavyQuery(query, identifiers);
-  const shouldRerank = enableReranking && !codeHeavy;
-
-  let results: DedupedResult[];
-  if (shouldRerank && allSorted.length > 0) {
-    // Cross-encoder reranking: re-score top candidates for precision
-    const toRerank = allSorted.slice(0, topK * 2);
-    try {
-      const passages = toRerank.map((r) => r.snippets[0] ?? "");
-      const rerankScores = await rerank(query, passages);
-      const reranked = toRerank
-        .map((r, i) => ({ ...r, score: rerankScores[i] }))
-        .sort((a, b) => b.score - a.score);
-      // Doc expansion — docs are bonus results, don't displace code
-      results = expandForDocs(reranked, topK);
-    } catch (err) {
-      log.warn(`Reranking failed, using hybrid scores: ${err instanceof Error ? err.message : err}`, "search");
-      results = expandForDocs(allSorted, topK);
-    }
-  } else {
-    // Doc expansion
-    results = expandForDocs(allSorted, topK);
-  }
+  // Doc expansion — docs are bonus results, don't displace code
+  const results = expandForDocs(allSorted, topK);
 
   // Log query for analytics
   const durationMs = Math.round(performance.now() - start);
@@ -270,6 +237,73 @@ export async function search(
 }
 
 /**
+ * Count-based parent grouping: when ≥2 sub-chunks from the same parent appear
+ * in results, replace them all with the parent chunk (keeping highest score).
+ * This prevents sibling methods from consuming multiple result slots.
+ */
+function groupByParent(results: ChunkSearchResult[], db: RagDB, minCount: number = 2): ChunkSearchResult[] {
+  // Group children by parentId
+  const parentGroups = new Map<number, { members: ChunkSearchResult[]; bestScore: number }>();
+  const nonChildren: ChunkSearchResult[] = [];
+
+  for (const r of results) {
+    if (r.parentId != null) {
+      const group = parentGroups.get(r.parentId);
+      if (group) {
+        group.members.push(r);
+        if (r.score > group.bestScore) group.bestScore = r.score;
+      } else {
+        parentGroups.set(r.parentId, { members: [r], bestScore: r.score });
+      }
+    } else {
+      nonChildren.push(r);
+    }
+  }
+
+  // Replace groups that meet the threshold with parent chunk
+  const promoted: ChunkSearchResult[] = [];
+  const keptChildren: ChunkSearchResult[] = [];
+  const parentCache = new Map<number, ReturnType<typeof db.getChunkById>>();
+
+  for (const [parentId, group] of parentGroups) {
+    if (group.members.length >= minCount) {
+      // Fetch parent chunk
+      if (!parentCache.has(parentId)) {
+        parentCache.set(parentId, db.getChunkById(parentId));
+      }
+      const parent = parentCache.get(parentId);
+      if (parent) {
+        // Check if parent chunk itself is already in nonChildren (avoid duplication)
+        const parentAlreadyPresent = nonChildren.some(
+          (r) => r.path === parent.path && r.startLine === parent.startLine && r.endLine === parent.endLine
+        );
+        if (!parentAlreadyPresent) {
+          promoted.push({
+            path: parent.path,
+            score: group.bestScore,
+            content: parent.snippet,
+            chunkIndex: -1,
+            entityName: parent.entityName,
+            chunkType: parent.chunkType,
+            startLine: parent.startLine,
+            endLine: parent.endLine,
+            parentId: null,
+          });
+        }
+      } else {
+        // Parent not found in DB — keep children as-is
+        keptChildren.push(...group.members);
+      }
+    } else {
+      // Below count threshold — keep children individually
+      keptChildren.push(...group.members);
+    }
+  }
+
+  return [...nonChildren, ...promoted, ...keptChildren].sort((a, b) => b.score - a.score);
+}
+
+/**
  * Chunk-level search: returns individual semantic chunks ranked by relevance.
  * No file deduplication — two chunks from the same file can both appear.
  */
@@ -279,7 +313,6 @@ export async function searchChunks(
   topK: number = 8,
   threshold: number = 0.3,
   hybridWeight: number = DEFAULT_HYBRID_WEIGHT,
-  enableReranking: boolean = false
 ): Promise<ChunkResult[]> {
   const start = performance.now();
   const queryEmbedding = await embed(query);
@@ -315,23 +348,11 @@ export async function searchChunks(
     })
     .sort((a, b) => b.score - a.score);
 
-  // Cross-encoder reranking: re-score top candidates for precision
-  if (enableReranking && results.length > 0) {
-    const toRerank = results.slice(0, topK * 2);
-    try {
-      const passages = toRerank.map((r) => r.content);
-      const rerankScores = await rerank(query, passages);
-      const reranked = toRerank
-        .map((r, i) => ({ ...r, score: rerankScores[i] }))
-        .sort((a, b) => b.score - a.score);
-      results = expandForDocs(reranked, topK);
-    } catch (err) {
-      log.warn(`Reranking failed, using hybrid scores: ${err instanceof Error ? err.message : err}`, "search");
-      results = expandForDocs(results, topK);
-    }
-  } else {
-    results = expandForDocs(results, topK);
-  }
+  // Parent grouping: if ≥2 sub-chunks from the same parent appear, consolidate
+  results = groupByParent(results, db);
+
+  // Doc expansion
+  results = expandForDocs(results, topK);
 
   // Log query for analytics
   const durationMs = Math.round(performance.now() - start);
